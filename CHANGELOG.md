@@ -2,6 +2,50 @@
 
 All notable changes to this project are documented in this file.
 
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [2.0.0] - 2024-12-02
+
+### Major Release - Full Integration
+
+This release integrates the best features from both `organize_and_dedup` v1.0 and `checksum-file-renamer` v1.1 into a unified, feature-rich tool.
+
+### Added
+- **Multiple Hash Algorithms**: Support for SHA1, SHA256, SHA512, and MD5
+- **Simple Mode**: Fast checksum-based renaming with extension organization
+- **Advanced Mode**: Full-featured organization (same as v1.0 behavior)
+- **Flexible Naming Formats**: Choose between `hash`, `hash_ext`, or `date_hash_ext`
+- **Multiple Organization Methods**: `none`, `extension`, `category`, `date`, or `category_date`
+- **Rich CLI**: Comprehensive `--help` text with examples
+- **Docker Support**: Dockerfile and Makefile for containerized deployment
+- **Configurable Options**: Control archive extraction, recursion, and deduplication
+- **Verbose and Quiet Modes**: Control output verbosity (`-v`, `-q`)
+- **Version Flag**: `--version` to display version information
+
+### Changed
+- **CLI Interface**: New option-based interface (backward compatible with v1.0)
+- **Mode Presets**: Simple and advanced modes with sensible defaults
+- **Hash Registry**: Now includes algorithm in filename (`.hash_registry_<algorithm>.txt`)
+- **Documentation**: Completely rewritten README with comprehensive examples
+- **File Naming**: Configurable naming format (previously always `date_hash.ext`)
+- **Organization**: Configurable organization method (previously always `category/date`)
+
+### Improved
+- **Flexibility**: Choose exactly how files are named and organized
+- **Performance**: Option to use faster hash algorithms (MD5) for large files
+- **Usability**: Clear help text and examples
+- **Deployment**: Docker support for consistent environments
+- **Compatibility**: Maintains backward compatibility with v1.0 usage
+
+### Migration from v1.0
+- v1.0 usage still works: `./organize_and_dedup.sh /input /output`
+- v1.0 behavior is now "advanced mode" (default)
+- Environment variables still work: `ACTION=mv ./script.sh`
+- Hash registry from v1.0 is compatible (SHA256 algorithm)
+
+---
+
 ## [1.0.0] - 2024-12-02
 
 ### Initial Release
@@ -48,12 +92,6 @@ This is the first production-ready release after extensive code review and testi
 - **Deduplication**: File-based registry
 - **Date Extraction**: EXIF → CreateDate → stat → current date
 
-### Known Limitations
-
-- SHA256 is CPU-intensive for very large video files (can switch to MD5 if needed)
-- Requires bash 4+ for associative arrays (not used in final version, but syntax requires it)
-- Cannot deduplicate files with different content but same hash (extremely unlikely with SHA256)
-
 ### Dependencies
 
 **Required:**
@@ -68,6 +106,8 @@ This is the first production-ready release after extensive code review and testi
 - 7z (for 7Z archives)
 - gunzip, bunzip2, unxz (for individual compressed files)
 
+---
+
 ## Future Enhancements (Planned)
 
 - [ ] Verification script to validate hash registry
@@ -76,6 +116,14 @@ This is the first production-ready release after extensive code review and testi
 - [ ] Database backend option for very large collections
 - [ ] Web UI for browsing organized files
 - [ ] Support for additional archive formats
-- [ ] Configurable hash algorithm (MD5, SHA1, SHA256, xxhash)
 - [ ] Dry-run mode to preview changes
 - [ ] Undo functionality
+- [ ] Cloud storage integration (S3, Google Drive, etc.)
+- [ ] Plugin system for custom categories
+
+---
+
+## Version History Summary
+
+- **v2.0.0** (2024-12-02) - Full integration with multiple modes, hash algorithms, and Docker support
+- **v1.0.0** (2024-12-02) - Initial release with advanced organization and deduplication
