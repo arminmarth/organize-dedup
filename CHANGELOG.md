@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2024-12-02
+
+### Fixed
+- **Security:** Removed `eval` usage in Phase 1 and Phase 2 (replaced with bash arrays for safer command construction)
+- **Correctness:** EXIF-detected file extensions are now normalized (e.g., "JPEG" → "jpg", "Matroska" → "mkv") for proper categorization
+- **Safety:** Added guard against using `INPUT_DIR == OUTPUT_DIR` with `ACTION=mv` to prevent confusing behavior
+- **Code Quality:** Clarified variable scope by declaring `clean_dt`, `datetime`, and `year_month` at the top of `process_file` function
+
+### Changed
+- **README:** Clarified that `-i` and `-o` have defaults (`.` and `./export`) rather than being strictly required
+- **README:** Added note that mode presets only apply when options are at default values (explicit flags take precedence)
+
+### Code Review
+All improvements based on comprehensive code reviews from ChatGPT (2 rounds) and Gemini. All reviewers agreed v2.0.0 was production-ready; these changes are polish and safety improvements.
+
+---
+
 ## [2.0.0] - 2024-12-02
 
 ### Major Release - Full Integration
@@ -125,5 +142,6 @@ This is the first production-ready release after extensive code review and testi
 
 ## Version History Summary
 
+- **v2.0.1** (2024-12-02) - Security and correctness improvements based on code reviews
 - **v2.0.0** (2024-12-02) - Full integration with multiple modes, hash algorithms, and Docker support
 - **v1.0.0** (2024-12-02) - Initial release with advanced organization and deduplication

@@ -1,20 +1,20 @@
 #!/bin/bash
 
-# organize_and_dedup.sh - v2.0.0
+# organize_and_dedup.sh - v2.0.1
 # 
 # A comprehensive file organization and deduplication tool with multiple modes:
 # - Simple mode: Fast checksum-based renaming with extension organization
 # - Advanced mode: Full deduplication, archive extraction, date-based categorization
 #
 # Author: Armin Marth
-# Version: 2.0.0
+# Version: 2.0.1
 # License: MIT
 
 set -euo pipefail
 
 # ==================== VERSION ====================
 
-VERSION="2.0.0"
+VERSION="2.0.1"
 
 # ==================== DEFAULT CONFIGURATION ====================
 
@@ -411,6 +411,14 @@ OUTPUT_DIR=$(cd "$OUTPUT_DIR" && pwd)
 # Return to original directory
 cd "$original_pwd"
 
+# Guard against INPUT_DIR == OUTPUT_DIR with ACTION=mv
+if [[ "$ACTION" == "mv" ]] && [[ "$INPUT_DIR" == "$OUTPUT_DIR" ]]; then
+    echo "Error: INPUT_DIR and OUTPUT_DIR must differ when ACTION=mv" >&2
+    echo "  INPUT_DIR:  $INPUT_DIR" >&2
+    echo "  OUTPUT_DIR: $OUTPUT_DIR" >&2
+    exit 1
+fi
+
 # Print configuration (unless quiet)
 if [[ "$QUIET" != true ]]; then
     echo "========================================"
@@ -647,6 +655,9 @@ export -f extract_file
 
 process_file() {
     local file="$1"
+    local datetime=""
+    local year_month=""
+    local clean_dt=""
 
     # Skip if not a regular file
     if [[ ! -f "$file" ]]; then
@@ -695,9 +706,10 @@ process_file() {
 
     # Detect extension if missing (using exiftool)
     if [[ -z "$extension" ]] && command -v exiftool &> /dev/null; then
-        local detected_extension=$(exiftool -s -s -s -FileType "$file" 2>/dev/null | tr '[:upper:]' '[:lower:]')
-        if [[ -n "$detected_extension" ]]; then
-            extension="$detected_extension"
+        local detected_type
+        detected_type=$(exiftool -s -s -s -FileType "$file" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+        if [[ -n "$detected_type" ]]; then
+            extension=$(normalize_extension "$detected_type")
         fi
     fi
 
@@ -712,8 +724,6 @@ process_file() {
     fi
 
     # Get date if needed
-    local datetime=""
-    local year_month=""
     if [[ "$NAMING_FORMAT" == "date_hash_ext" ]] || [[ "$ORGANIZE_BY" =~ date ]]; then
         datetime=$(exiftool -s3 -DateTimeOriginal "$file" 2>/dev/null || true)
         
@@ -734,7 +744,7 @@ process_file() {
         fi
 
         # Clean datetime for filename
-        local clean_dt=$(echo "$datetime" | tr ':' '-' | tr ' ' '_')
+        clean_dt=$(echo "$datetime" | tr ':' '-' | tr ' ' '_')
         year_month=$(echo "$clean_dt" | cut -d'_' -f1 | cut -d'-' -f1-2)
     fi
 
@@ -860,15 +870,16 @@ if [[ "$EXTRACT_ARCHIVES" == "yes" ]] || [[ "$EXTRACT_ARCHIVES" == "true" ]]; th
         echo "======================================" | tee -a "$log_file"
     fi
 
-    if [[ "$RECURSIVE" == "yes" ]] || [[ "$RECURSIVE" == "true" ]]; then
-        find_cmd="find \"$INPUT_DIR\" -type f"
-    else
-        find_cmd="find \"$INPUT_DIR\" -maxdepth 1 -type f"
+    # Build find command using arrays (safer than eval)
+    local find_args=("$INPUT_DIR")
+    if [[ "$RECURSIVE" != "yes" ]] && [[ "$RECURSIVE" != "true" ]]; then
+        find_args+=("-maxdepth" "1")
     fi
+    find_args+=("-type" "f")
 
     while IFS= read -r -d '' file; do
         extract_file "$file" "$temp_dir"
-    done < <(eval "$find_cmd" \( \
+    done < <(find "${find_args[@]}" \( \
         -iname "*.zip" -o -iname "*.tar.gz" -o -iname "*.tgz" -o \
         -iname "*.rar" -o -iname "*.tar.bz2" -o -iname "*.tbz2" -o \
         -iname "*.tar.xz" -o -iname "*.txz" -o -iname "*.7z" -o \
@@ -888,15 +899,16 @@ if [[ "$EXTRACT_ARCHIVES" == "yes" ]] || [[ "$EXTRACT_ARCHIVES" == "true" ]]; th
         echo "======================================" | tee -a "$log_file"
     fi
 
-    if [[ "$RECURSIVE" == "yes" ]] || [[ "$RECURSIVE" == "true" ]]; then
-        find_cmd="find \"$INPUT_DIR\" -type f"
-    else
-        find_cmd="find \"$INPUT_DIR\" -maxdepth 1 -type f"
+    # Build find command using arrays (safer than eval)
+    local find_args=("$INPUT_DIR")
+    if [[ "$RECURSIVE" != "yes" ]] && [[ "$RECURSIVE" != "true" ]]; then
+        find_args+=("-maxdepth" "1")
     fi
+    find_args+=("-type" "f")
 
     while IFS= read -r -d '' file; do
         process_file "$file"
-    done < <(eval "$find_cmd" \( \
+    done < <(find "${find_args[@]}" \( \
         -iname "*.zip" -o -iname "*.tar.gz" -o -iname "*.tgz" -o \
         -iname "*.rar" -o -iname "*.tar.bz2" -o -iname "*.tbz2" -o \
         -iname "*.tar.xz" -o -iname "*.txz" -o -iname "*.7z" -o \

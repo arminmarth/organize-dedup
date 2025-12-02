@@ -1,7 +1,7 @@
 # organize-dedup
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-2.0.0-blue)](https://github.com/arminmarth/organize-dedup/releases)
+[![Version](https://img.shields.io/badge/version-2.0.1-blue)](https://github.com/arminmarth/organize-dedup/releases)
 
 A comprehensive file organization and deduplication tool with multiple modes, hash algorithms, and flexible organization methods.
 
@@ -100,8 +100,8 @@ chmod +x organize_and_dedup.sh
 | Option | Values | Default | Description |
 |--------|--------|---------|-------------|
 | `--mode` | `simple`, `advanced` | `advanced` | Operational mode |
-| `-i, --input-dir` | path | (required) | Input directory |
-| `-o, --output-dir` | path | (required) | Output directory |
+| `-i, --input-dir` | path | `.` (current dir) | Input directory |
+| `-o, --output-dir` | path | `./export` | Output directory |
 | `-a, --action` | `cp`, `mv` | `cp` | Copy or move files |
 
 ### Hash Options
@@ -221,6 +221,8 @@ The tool recognizes 13 file categories:
 | **Others** | Everything else |
 
 ## Mode Presets
+
+**Note:** Mode presets are applied only when options are at their default values. Explicit command-line flags always take precedence.
 
 ### Simple Mode Sets:
 - `--naming-format hash_ext`
