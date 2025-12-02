@@ -1,20 +1,20 @@
 #!/bin/bash
 
-# organize_and_dedup.sh - v2.0.1
+# organize_and_dedup.sh - v2.0.2
 # 
 # A comprehensive file organization and deduplication tool with multiple modes:
 # - Simple mode: Fast checksum-based renaming with extension organization
 # - Advanced mode: Full deduplication, archive extraction, date-based categorization
 #
 # Author: Armin Marth
-# Version: 2.0.1
+# Version: 2.0.2
 # License: MIT
 
 set -euo pipefail
 
 # ==================== VERSION ====================
 
-VERSION="2.0.1"
+VERSION="2.0.2"
 
 # ==================== DEFAULT CONFIGURATION ====================
 
@@ -56,8 +56,8 @@ QUIET=false
 # ==================== HELP TEXT ====================
 
 show_help() {
-    cat << 'EOF'
-organize_and_dedup.sh - v2.0.0
+    cat << EOF
+organize_and_dedup.sh - v$VERSION
 
 A comprehensive file organization and deduplication tool.
 
@@ -70,8 +70,8 @@ MODES:
     --mode advanced    Full deduplication, archives, dates, categories (default)
 
 CORE OPTIONS:
-    -i, --input-dir DIR        Input directory (required)
-    -o, --output-dir DIR       Output directory (required)
+    -i, --input-dir DIR        Input directory (default: .)
+    -o, --output-dir DIR       Output directory (default: ./export)
     -a, --action ACTION        Action: cp (copy) or mv (move) [default: cp]
 
 HASH OPTIONS:
@@ -188,18 +188,22 @@ parse_arguments() {
                 ;;
             --naming-format)
                 NAMING_FORMAT="$2"
+                NAMING_FORMAT_SET=true
                 shift 2
                 ;;
             --organize-by)
                 ORGANIZE_BY="$2"
+                ORGANIZE_BY_SET=true
                 shift 2
                 ;;
             --extract-archives)
                 EXTRACT_ARCHIVES="$2"
+                EXTRACT_ARCHIVES_SET=true
                 shift 2
                 ;;
             --recursive)
                 RECURSIVE="$2"
+                RECURSIVE_SET=true
                 shift 2
                 ;;
             --deduplicate)
@@ -259,11 +263,11 @@ parse_arguments() {
 apply_mode_presets() {
     case "$MODE" in
         simple)
-            # Simple mode presets (unless explicitly overridden)
-            [[ "$NAMING_FORMAT" == "date_hash_ext" ]] && NAMING_FORMAT="hash_ext"
-            [[ "$ORGANIZE_BY" == "category_date" ]] && ORGANIZE_BY="extension"
-            [[ "$EXTRACT_ARCHIVES" == "yes" ]] && EXTRACT_ARCHIVES="no"
-            [[ "$RECURSIVE" == "yes" ]] && RECURSIVE="no"
+            # Simple mode presets (only if not explicitly set by user)
+            [[ "${NAMING_FORMAT_SET:-false}" == "false" ]] && NAMING_FORMAT="hash_ext"
+            [[ "${ORGANIZE_BY_SET:-false}" == "false" ]] && ORGANIZE_BY="extension"
+            [[ "${EXTRACT_ARCHIVES_SET:-false}" == "false" ]] && EXTRACT_ARCHIVES="no"
+            [[ "${RECURSIVE_SET:-false}" == "false" ]] && RECURSIVE="no"
             ;;
         advanced)
             # Advanced mode presets (current defaults)
@@ -274,6 +278,7 @@ apply_mode_presets() {
             exit 1
             ;;
     esac
+    return 0
 }
 
 # ==================== VALIDATION ====================
@@ -493,7 +498,8 @@ calculate_hash() {
 # Check if hash exists in registry
 hash_exists() {
     local hash="$1"
-    grep -qxF "$hash" "$hash_registry" 2>/dev/null
+    grep -qxF "$hash" "$hash_registry" 2>/dev/null || return 1
+    return 0
 }
 
 # Add hash to registry
@@ -871,7 +877,7 @@ if [[ "$EXTRACT_ARCHIVES" == "yes" ]] || [[ "$EXTRACT_ARCHIVES" == "true" ]]; th
     fi
 
     # Build find command using arrays (safer than eval)
-    local find_args=("$INPUT_DIR")
+    find_args=("$INPUT_DIR")
     if [[ "$RECURSIVE" != "yes" ]] && [[ "$RECURSIVE" != "true" ]]; then
         find_args+=("-maxdepth" "1")
     fi
@@ -900,7 +906,7 @@ if [[ "$EXTRACT_ARCHIVES" == "yes" ]] || [[ "$EXTRACT_ARCHIVES" == "true" ]]; th
     fi
 
     # Build find command using arrays (safer than eval)
-    local find_args=("$INPUT_DIR")
+    find_args=("$INPUT_DIR")
     if [[ "$RECURSIVE" != "yes" ]] && [[ "$RECURSIVE" != "true" ]]; then
         find_args+=("-maxdepth" "1")
     fi
