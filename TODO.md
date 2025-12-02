@@ -11,11 +11,31 @@ This document tracks planned improvements, enhancements, and known issues for fu
 **Priority:** Medium  
 **Target:** Minor release with documentation improvements and polish
 
+### Bug Fixes
+
+- [ ] **Fix script self-processing bug** ([#1](https://github.com/arminmarth/organize-dedup/issues/1))
+  - Script currently processes itself when INPUT_DIR is "."
+  - Add check to skip the script file itself
+  - Prevent recursive growth from multiple runs
+  - Solution: Add basename comparison in `process_file()` function
+
+- [ ] **Add --exclude pattern option**
+  - Allow users to exclude files by glob patterns
+  - Example: `--exclude "*.sh" --exclude "*.md"`
+  - Useful for skipping development files
+
+- [ ] **Auto-exclude common development files**
+  - `.git/` directory
+  - `.vscode/`, `.idea/` IDE folders
+  - `node_modules/`, `venv/` dependency folders
+  - Make configurable via option
+
 ### Documentation Improvements
 
 - [ ] **Update README version badge** from v2.0.1 to v2.0.2
 - [ ] **Add ShellCheck badge** to README for instant quality confidence
 - [ ] **Add "Known Behaviors" section** to README covering:
+  - **Script self-processing** when INPUT_DIR is "." (see [#1](https://github.com/arminmarth/organize-dedup/issues/1))
   - Duplicate handling in `mv` mode (duplicates left in source directory)
   - Long filenames with SHA512 (up to 160 characters)
   - Persistent dedup registry across runs
