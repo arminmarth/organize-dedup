@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# organize_and_dedup.sh - v2.0.2
+# organize_and_dedup.sh - v2.1.0
 # 
 # A comprehensive file organization and deduplication tool with multiple modes:
 # - Simple mode: Fast checksum-based renaming with extension organization
@@ -14,7 +14,7 @@ set -euo pipefail
 
 # ==================== VERSION ====================
 
-VERSION="2.0.2"
+VERSION="2.1.0"
 
 # ==================== DEFAULT CONFIGURATION ====================
 
@@ -48,6 +48,15 @@ DEDUPLICATE="${DEDUPLICATE:-yes}"
 
 # Strict tool checking
 STRICT_TOOLS="${STRICT_TOOLS:-false}"
+
+# Extension correction: yes or no
+FIX_EXTENSIONS="${FIX_EXTENSIONS:-no}"
+
+# Strict extensions: yes or no (only process files with correct extensions)
+STRICT_EXTENSIONS="${STRICT_EXTENSIONS:-no}"
+
+# Report extensions: yes or no (generate mismatch report only)
+REPORT_EXTENSIONS="${REPORT_EXTENSIONS:-no}"
 
 # Verbosity
 VERBOSE=false
@@ -96,6 +105,11 @@ PROCESSING OPTIONS:
     --extract-archives BOOL    Extract archives: yes, no [default: yes in advanced mode]
     --recursive BOOL           Process subdirectories: yes, no [default: yes]
     --deduplicate BOOL         Enable deduplication: yes, no [default: yes]
+
+EXTENSION CORRECTION OPTIONS:
+    --fix-extensions BOOL      Detect and correct file extensions: yes, no [default: no]
+    --strict-extensions BOOL   Only process files with correct extensions: yes, no [default: no]
+    --report-extensions BOOL   Generate extension mismatch report only: yes, no [default: no]
 
 TOOL OPTIONS:
     --strict-tools BOOL        Require all tools: yes, no [default: no]
@@ -208,6 +222,18 @@ parse_arguments() {
                 ;;
             --deduplicate)
                 DEDUPLICATE="$2"
+                shift 2
+                ;;
+            --fix-extensions)
+                FIX_EXTENSIONS="$2"
+                shift 2
+                ;;
+            --strict-extensions)
+                STRICT_EXTENSIONS="$2"
+                shift 2
+                ;;
+            --report-extensions)
+                REPORT_EXTENSIONS="$2"
                 shift 2
                 ;;
             --strict-tools)
@@ -454,12 +480,21 @@ temp_dir=$(mktemp -d -p "$tmp_dir")
 # Hash registry for deduplication
 hash_registry="$OUTPUT_DIR/.hash_registry_${HASH_ALGORITHM}.txt"
 touch "$hash_registry"
+
+# Extension mismatch report
+mismatch_report="$OUTPUT_DIR/extension_mismatches.csv"
+if [[ "$FIX_EXTENSIONS" == "yes" ]] || [[ "$STRICT_EXTENSIONS" == "yes" ]] || [[ "$REPORT_EXTENSIONS" == "yes" ]]; then
+    echo "original_path,current_ext,detected_ext,mime_type,hash,action" > "$mismatch_report"
+    export mismatch_report
+fi
 export hash_registry
 
 # Statistics tracking
 declare -g files_processed=0
 declare -g duplicates_skipped=0
-export files_processed duplicates_skipped
+declare -g extensions_corrected=0
+declare -g extensions_mismatched=0
+export files_processed duplicates_skipped extensions_corrected extensions_mismatched
 
 # Cleanup function
 cleanup() {
@@ -469,6 +504,112 @@ cleanup() {
 }
 
 trap cleanup EXIT INT TERM
+
+# ==================== MIME TYPE TO EXTENSION MAPPING ====================
+
+# Comprehensive MIME type to file extension mapping
+declare -A MIME_TO_EXT=(
+    # Documents
+    ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"]="docx"
+    ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]="xlsx"
+    ["application/vnd.openxmlformats-officedocument.presentationml.presentation"]="pptx"
+    ["application/msword"]="doc"
+    ["application/vnd.ms-excel"]="xls"
+    ["application/vnd.ms-powerpoint"]="ppt"
+    ["application/pdf"]="pdf"
+    ["application/rtf"]="rtf"
+    ["application/vnd.oasis.opendocument.text"]="odt"
+    ["application/vnd.oasis.opendocument.spreadsheet"]="ods"
+    ["application/vnd.oasis.opendocument.presentation"]="odp"
+    
+    # Archives
+    ["application/zip"]="zip"
+    ["application/x-rar"]="rar"
+    ["application/x-rar-compressed"]="rar"
+    ["application/vnd.rar"]="rar"
+    ["application/x-7z-compressed"]="7z"
+    ["application/x-tar"]="tar"
+    ["application/gzip"]="gz"
+    ["application/x-gzip"]="gz"
+    ["application/x-bzip2"]="bz2"
+    ["application/x-xz"]="xz"
+    ["application/x-compress"]="z"
+    
+    # Images
+    ["image/jpeg"]="jpg"
+    ["image/png"]="png"
+    ["image/gif"]="gif"
+    ["image/webp"]="webp"
+    ["image/svg+xml"]="svg"
+    ["image/bmp"]="bmp"
+    ["image/x-ms-bmp"]="bmp"
+    ["image/tiff"]="tiff"
+    ["image/x-icon"]="ico"
+    ["image/vnd.adobe.photoshop"]="psd"
+    ["image/heic"]="heic"
+    ["image/heif"]="heif"
+    
+    # Video
+    ["video/mp4"]="mp4"
+    ["video/x-matroska"]="mkv"
+    ["video/quicktime"]="mov"
+    ["video/x-msvideo"]="avi"
+    ["video/webm"]="webm"
+    ["video/x-flv"]="flv"
+    ["video/mpeg"]="mpeg"
+    ["video/3gpp"]="3gp"
+    ["video/x-ms-wmv"]="wmv"
+    
+    # Audio
+    ["audio/mpeg"]="mp3"
+    ["audio/mp4"]="m4a"
+    ["audio/x-wav"]="wav"
+    ["audio/wav"]="wav"
+    ["audio/flac"]="flac"
+    ["audio/ogg"]="ogg"
+    ["audio/x-ms-wma"]="wma"
+    ["audio/aac"]="aac"
+    ["audio/opus"]="opus"
+    
+    # Text & Code
+    ["text/plain"]="txt"
+    ["text/html"]="html"
+    ["text/css"]="css"
+    ["text/javascript"]="js"
+    ["application/javascript"]="js"
+    ["application/json"]="json"
+    ["application/xml"]="xml"
+    ["text/xml"]="xml"
+    ["text/csv"]="csv"
+    ["text/markdown"]="md"
+    ["text/x-python"]="py"
+    ["text/x-shellscript"]="sh"
+    ["text/x-c"]="c"
+    ["text/x-c++"]="cpp"
+    ["text/x-java"]="java"
+    ["text/x-php"]="php"
+    ["text/x-ruby"]="rb"
+    ["text/x-go"]="go"
+    ["text/x-rust"]="rs"
+    
+    # Executables & Binaries
+    ["application/x-executable"]="bin"
+    ["application/x-sharedlib"]="so"
+    ["application/x-mach-binary"]="bin"
+    ["application/x-dosexec"]="exe"
+    ["application/vnd.microsoft.portable-executable"]="exe"
+    ["application/x-msdownload"]="exe"
+    
+    # Fonts
+    ["font/ttf"]="ttf"
+    ["font/otf"]="otf"
+    ["font/woff"]="woff"
+    ["font/woff2"]="woff2"
+    ["application/x-font-ttf"]="ttf"
+    ["application/x-font-otf"]="otf"
+)
+
+export MIME_TO_EXT
 
 # ==================== HASH FUNCTIONS ====================
 
@@ -550,6 +691,37 @@ normalize_extension() {
         # Default: return as-is
         *) echo "$ext" ;;
     esac
+}
+
+# Detect correct file extension based on content
+detect_correct_extension() {
+    local file="$1"
+    local current_ext="${file##*.}"
+    
+    # If file has no extension, set current_ext to empty
+    if [[ "$current_ext" == "$file" ]]; then
+        current_ext=""
+    fi
+    
+    # Get MIME type using file command
+    local mime_type
+    mime_type=$(file -b --mime-type "$file" 2>/dev/null)
+    
+    if [[ -z "$mime_type" ]]; then
+        # Fallback: return current extension or empty
+        echo "${current_ext}"
+        return
+    fi
+    
+    # Look up correct extension from MIME type
+    local correct_ext="${MIME_TO_EXT[$mime_type]}"
+    
+    if [[ -n "$correct_ext" ]]; then
+        echo "$correct_ext"
+    else
+        # Fallback: return current extension or empty
+        echo "${current_ext}"
+    fi
 }
 
 get_category() {
@@ -716,6 +888,47 @@ process_file() {
         detected_type=$(exiftool -s -s -s -FileType "$file" 2>/dev/null | tr '[:upper:]' '[:lower:]')
         if [[ -n "$detected_type" ]]; then
             extension=$(normalize_extension "$detected_type")
+        fi
+    fi
+
+    # Extension correction: detect correct extension based on file content
+    local original_extension="$extension"
+    local detected_extension=""
+    local mime_type=""
+    
+    if [[ "$FIX_EXTENSIONS" == "yes" ]] || [[ "$STRICT_EXTENSIONS" == "yes" ]] || [[ "$REPORT_EXTENSIONS" == "yes" ]]; then
+        detected_extension=$(detect_correct_extension "$file")
+        mime_type=$(file -b --mime-type "$file" 2>/dev/null)
+        
+        # Check for mismatch
+        if [[ -n "$detected_extension" ]] && [[ "$detected_extension" != "$original_extension" ]]; then
+            # Log mismatch
+            if [[ "$VERBOSE" == true ]] || [[ "$REPORT_EXTENSIONS" == "yes" ]]; then
+                echo "Extension mismatch: $file" | tee -a "$log_file"
+                echo "  Current: ${original_extension:-none}, Detected: $detected_extension (${mime_type})" | tee -a "$log_file"
+            fi
+            
+            # Record mismatch for report
+            ((extensions_mismatched++)) || true
+            echo "$file,${original_extension:-none},$detected_extension,$mime_type,$hash,$(if [[ "$FIX_EXTENSIONS" == "yes" ]]; then echo "corrected"; else echo "detected"; fi)" >> "$mismatch_report"
+            
+            # Apply correction if --fix-extensions is enabled
+            if [[ "$FIX_EXTENSIONS" == "yes" ]]; then
+                extension="$detected_extension"
+                ((extensions_corrected++)) || true
+                [[ "$VERBOSE" == true ]] && echo "  Action: Using correct extension .$extension" | tee -a "$log_file"
+            fi
+            
+            # Skip file if --strict-extensions is enabled and extension is wrong
+            if [[ "$STRICT_EXTENSIONS" == "yes" ]]; then
+                echo "  Action: Skipping file (strict mode)" | tee -a "$log_file"
+                return
+            fi
+        fi
+        
+        # If --report-extensions is enabled, just report and skip processing
+        if [[ "$REPORT_EXTENSIONS" == "yes" ]]; then
+            return
         fi
     fi
 
@@ -981,6 +1194,12 @@ if [[ "$QUIET" != true ]]; then
     echo "Output directory: $OUTPUT_DIR" | tee -a "$log_file"
     echo "Log file: $log_file" | tee -a "$log_file"
     echo "Hash registry: $hash_registry" | tee -a "$log_file"
+    
+    # Show extension mismatch report if generated
+    if [[ -f "$mismatch_report" ]]; then
+        echo "Extension mismatch report: $mismatch_report" | tee -a "$log_file"
+    fi
+    
     echo "" | tee -a "$log_file"
 fi
 
@@ -996,6 +1215,13 @@ if [[ "$QUIET" != true ]]; then
     echo "Files successfully processed: $files_processed" | tee -a "$log_file"
     echo "Duplicates skipped this run: $duplicates_skipped" | tee -a "$log_file"
     echo "Total unique hashes in registry (all runs): $end_hash_count" | tee -a "$log_file"
+    
+    # Show extension correction statistics if enabled
+    if [[ "$FIX_EXTENSIONS" == "yes" ]] || [[ "$STRICT_EXTENSIONS" == "yes" ]] || [[ "$REPORT_EXTENSIONS" == "yes" ]]; then
+        echo "Extensions corrected: $extensions_corrected" | tee -a "$log_file"
+        echo "Extension mismatches detected: $extensions_mismatched" | tee -a "$log_file"
+    fi
+    
     echo "" | tee -a "$log_file"
 
     # Show organization breakdown
