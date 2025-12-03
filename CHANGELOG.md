@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.2] - 2025-12-03
+
+### ✨ UX Improvements
+- **Simplified flag syntax** - Extension correction flags now work like `--verbose` (no value needed)
+  - Use `--fix-extensions` instead of `--fix-extensions yes`
+  - Use `--strict-extensions` instead of `--strict-extensions yes`
+  - Use `--report-extensions` instead of `--report-extensions yes`
+  - Old syntax still works for backward compatibility
+
+### 🐛 Bug Fixes
+- **Fixed report → fix workflow** - `--report-extensions` no longer adds hashes to deduplication registry
+  - Previously: Running `--report-extensions` then `--fix-extensions` would skip all files as duplicates
+  - Now: Report mode doesn't pollute the hash registry, allowing subsequent processing
+  - Enables proper workflow: audit first, then fix
+
+### 📝 Documentation
+- Updated all examples to use simplified flag syntax
+- Updated help text to reflect new usage
+- README examples updated throughout
+
+---
+
 ## [2.1.1] - 2025-12-03
 
 ### 🐛 Bug Fixes

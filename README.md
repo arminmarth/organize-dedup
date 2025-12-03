@@ -1,7 +1,7 @@
 # organize-dedup
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-2.1.1-blue)](https://github.com/arminmarth/organize-dedup/releases)
+[![Version](https://img.shields.io/badge/version-2.1.2-blue)](https://github.com/arminmarth/organize-dedup/releases)
 
 A comprehensive file organization and deduplication tool with multiple modes, hash algorithms, and flexible organization methods.
 
@@ -95,13 +95,13 @@ chmod +x organize_and_dedup.sh
 ./organize_and_dedup.sh -v -i /input -o /output
 
 # Fix wrong file extensions automatically (NEW in v2.1.0)
-./organize_and_dedup.sh --fix-extensions yes -i /input -o /output
+./organize_and_dedup.sh --fix-extensions -i /input -o /output
 
 # Generate report of extension mismatches without processing
-./organize_and_dedup.sh --report-extensions yes -i /input -o /output
+./organize_and_dedup.sh --report-extensions -i /input -o /output
 
 # Skip files with wrong extensions (strict mode)
-./organize_and_dedup.sh --strict-extensions yes -i /input -o /output
+./organize_and_dedup.sh --strict-extensions -i /input -o /output
 ```
 
 ## Configuration Options
@@ -280,19 +280,19 @@ The tool can detect and correct file extensions based on actual file content usi
 
 ### Three Modes
 
-**Fix Mode** (`--fix-extensions yes`)
+**Fix Mode** (`--fix-extensions`)
 - Automatically corrects wrong extensions
 - Uses detected extension in output filename
 - Generates CSV report of all corrections
 - Example: `document.jpg` (actually PDF) → `...hash....pdf`
 
-**Report Mode** (`--report-extensions yes`)
+**Report Mode** (`--report-extensions`)
 - Scans files and generates mismatch report
 - Does not process or organize files
 - Useful for auditing file collections
 - Creates `extension_mismatches.csv` in output directory
 
-**Strict Mode** (`--strict-extensions yes`)
+**Strict Mode** (`--strict-extensions`)
 - Skips files with incorrect extensions
 - Only processes files with correct extensions
 - Useful for quality control
@@ -332,19 +332,19 @@ original_path,current_ext,detected_ext,mime_type,hash,action
 **Audit File Collection**
 ```bash
 # Generate report without processing
-./organize_and_dedup.sh --report-extensions yes -i /files -o /report
+./organize_and_dedup.sh --report-extensions -i /files -o /report
 ```
 
 **Fix Misnamed Files**
 ```bash
 # Automatically correct extensions
-./organize_and_dedup.sh --fix-extensions yes -i /messy -o /clean
+./organize_and_dedup.sh --fix-extensions -i /messy -o /clean
 ```
 
 **Quality Control**
 ```bash
 # Only process correctly-named files
-./organize_and_dedup.sh --strict-extensions yes -i /input -o /output
+./organize_and_dedup.sh --strict-extensions -i /input -o /output
 ```
 
 ## Performance

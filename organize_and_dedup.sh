@@ -14,7 +14,7 @@ set -euo pipefail
 
 # ==================== VERSION ====================
 
-VERSION="2.1.1"
+VERSION="2.1.2"
 
 # ==================== DEFAULT CONFIGURATION ====================
 
@@ -107,10 +107,9 @@ PROCESSING OPTIONS:
     --deduplicate BOOL         Enable deduplication: yes, no [default: yes]
 
 EXTENSION CORRECTION OPTIONS:
-    --fix-extensions yes|no    Automatically correct wrong extensions based on content [default: no]
-    --strict-extensions yes|no Skip files with incorrect extensions [default: no]
-    --report-extensions yes|no Generate mismatch report without processing [default: no]
-                               Note: These options require 'yes' or 'no' value
+    --fix-extensions           Automatically correct wrong extensions based on content
+    --strict-extensions        Skip files with incorrect extensions
+    --report-extensions        Generate mismatch report without processing files
 
 TOOL OPTIONS:
     --strict-tools BOOL        Require all tools: yes, no [default: no]
@@ -138,10 +137,10 @@ EXAMPLES:
     organize_and_dedup.sh -i /input -o /output --action mv
 
     # Fix wrong file extensions automatically
-    organize_and_dedup.sh -i /input -o /output --fix-extensions yes
+    organize_and_dedup.sh -i /input -o /output --fix-extensions
 
     # Generate report of extension mismatches
-    organize_and_dedup.sh -i /input -o /output --report-extensions yes
+    organize_and_dedup.sh -i /input -o /output --report-extensions
 
     # Legacy format (still supported)
     organize_and_dedup.sh /input /output
@@ -232,16 +231,16 @@ parse_arguments() {
                 shift 2
                 ;;
             --fix-extensions)
-                FIX_EXTENSIONS="$2"
-                shift 2
+                FIX_EXTENSIONS="yes"
+                shift
                 ;;
             --strict-extensions)
-                STRICT_EXTENSIONS="$2"
-                shift 2
+                STRICT_EXTENSIONS="yes"
+                shift
                 ;;
             --report-extensions)
-                REPORT_EXTENSIONS="$2"
-                shift 2
+                REPORT_EXTENSIONS="yes"
+                shift
                 ;;
             --strict-tools)
                 STRICT_TOOLS="$2"
@@ -866,14 +865,17 @@ process_file() {
         return
     fi
 
-    # Check for duplicates if deduplication is enabled
+    # Check for duplicates if deduplication is enabled (but not in report-only mode)
     if [[ "$DEDUPLICATE" == "yes" ]] || [[ "$DEDUPLICATE" == "true" ]]; then
         if hash_exists "$hash"; then
             [[ "$VERBOSE" == true ]] && echo "Duplicate skipped: $file (hash: $hash)"
             ((duplicates_skipped++)) || true
             return
         fi
-        add_hash "$hash"
+        # Don't add hash to registry if we're only reporting (not actually processing)
+        if [[ "$REPORT_EXTENSIONS" != "yes" ]]; then
+            add_hash "$hash"
+        fi
     fi
 
     # Get file extension
