@@ -94,6 +94,15 @@ This document tracks planned improvements, enhancements, and known issues for fu
 
 ### Organization Features
 
+- [ ] **Extension correction and validation (#2)** 🎯 HIGH PRIORITY
+  - Detect file content using `file` command magic bytes
+  - Correct mismatched extensions (e.g., `.zip` → `.docx`)
+  - Add missing extensions to extensionless files
+  - Handle duplicates with different extensions
+  - Generate extension mismatch report
+  - Options: `--fix-extensions`, `--strict-extensions`, `--report-extensions`
+  - See: [Feature Specification](../extension_correction_feature_spec.md)
+
 - [ ] **Custom organization patterns**
   - User-defined directory structures
   - Template variables (e.g., `{year}/{month}/{category}`)
