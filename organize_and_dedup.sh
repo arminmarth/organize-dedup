@@ -14,7 +14,7 @@ set -euo pipefail
 
 # ==================== VERSION ====================
 
-VERSION="2.1.2"
+VERSION="2.2.0"
 
 # ==================== DEFAULT CONFIGURATION ====================
 
@@ -58,6 +58,9 @@ STRICT_EXTENSIONS="${STRICT_EXTENSIONS:-no}"
 # Report extensions: yes or no (generate mismatch report only)
 REPORT_EXTENSIONS="${REPORT_EXTENSIONS:-no}"
 
+# Only process mismatched extensions: yes or no (reverse of strict-extensions)
+ONLY_MISMATCHED_EXTENSIONS="${ONLY_MISMATCHED_EXTENSIONS:-no}"
+
 # Verbosity
 VERBOSE=false
 QUIET=false
@@ -81,7 +84,11 @@ MODES:
 CORE OPTIONS:
     -i, --input-dir DIR        Input directory (default: .)
     -o, --output-dir DIR       Output directory (default: ./export)
-    -a, --action ACTION        Action: cp (copy) or mv (move) [default: cp]
+    -a, --action ACTION        Action: cp, mv, hardlink, softlink [default: cp]
+                               cp         → Copy files (duplicates data)
+                               mv         → Move files (original location emptied)
+                               hardlink   → Hard link (same inode, must be same filesystem)
+                               softlink   → Soft/symbolic link (pointer to original)
 
 HASH OPTIONS:
     --hash-algorithm ALG       Hash: sha1, sha256, sha512, md5 [default: sha256]
@@ -108,7 +115,8 @@ PROCESSING OPTIONS:
 
 EXTENSION CORRECTION OPTIONS:
     --fix-extensions           Automatically correct wrong extensions based on content
-    --strict-extensions        Skip files with incorrect extensions
+    --strict-extensions        Skip files with incorrect extensions (only process correct ones)
+    --only-mismatched-extensions  Only process files with incorrect extensions (skip correct ones)
     --report-extensions        Generate mismatch report without processing files
 
 TOOL OPTIONS:
@@ -242,6 +250,10 @@ parse_arguments() {
                 REPORT_EXTENSIONS="yes"
                 shift
                 ;;
+            --only-mismatched-extensions)
+                ONLY_MISMATCHED_EXTENSIONS="yes"
+                shift
+                ;;
             --strict-tools)
                 STRICT_TOOLS="$2"
                 shift 2
@@ -318,10 +330,10 @@ apply_mode_presets() {
 validate_options() {
     # Validate action
     case "$ACTION" in
-        cp|mv) ;;
+        cp|mv|hardlink|ln|softlink|symlink|ln-s) ;;
         *)
             echo "Error: Invalid action: $ACTION"
-            echo "Valid actions: cp, mv"
+            echo "Valid actions: cp, mv, hardlink, softlink"
             exit 1
             ;;
     esac
@@ -934,6 +946,13 @@ process_file() {
                 echo "  Action: Skipping file (strict mode)" | tee -a "$log_file"
                 return
             fi
+        else
+            # No mismatch detected
+            # If --only-mismatched-extensions is enabled, skip files with correct extensions
+            if [[ "$ONLY_MISMATCHED_EXTENSIONS" == "yes" ]]; then
+                [[ "$VERBOSE" == true ]] && echo "Skipping file with correct extension: $file" | tee -a "$log_file"
+                return
+            fi
         fi
         
         # If --report-extensions is enabled, just report and skip processing
@@ -1039,22 +1058,43 @@ process_file() {
         return
     fi
 
-    # Copy or move the file
-    if [[ "$ACTION" == "mv" ]]; then
-        if mv "$file" "$dest_file"; then
-            [[ "$VERBOSE" == true ]] && echo "Moved: $file -> $dest_file"
-            ((files_processed++)) || true
-        else
-            echo "Error moving: $file -> $dest_file" | tee -a "$log_file"
-        fi
-    else
-        if cp -p "$file" "$dest_file"; then
-            [[ "$VERBOSE" == true ]] && echo "Copied: $file -> $dest_file"
-            ((files_processed++)) || true
-        else
-            echo "Error copying: $file -> $dest_file" | tee -a "$log_file"
-        fi
-    fi
+    # Copy, move, or link the file
+    case "$ACTION" in
+        mv)
+            if mv "$file" "$dest_file"; then
+                [[ "$VERBOSE" == true ]] && echo "Moved: $file -> $dest_file"
+                ((files_processed++)) || true
+            else
+                echo "Error moving: $file -> $dest_file" | tee -a "$log_file"
+            fi
+            ;;
+        hardlink|ln)
+            if ln "$file" "$dest_file" 2>/dev/null; then
+                [[ "$VERBOSE" == true ]] && echo "Hardlinked: $file -> $dest_file"
+                ((files_processed++)) || true
+            else
+                echo "Error hardlinking: $file -> $dest_file (files must be on same filesystem)" | tee -a "$log_file"
+            fi
+            ;;
+        softlink|symlink|ln-s)
+            # Use absolute path for softlinks to ensure they work from any location
+            local abs_file=$(readlink -f "$file" 2>/dev/null || realpath "$file" 2>/dev/null || echo "$file")
+            if ln -s "$abs_file" "$dest_file" 2>/dev/null; then
+                [[ "$VERBOSE" == true ]] && echo "Softlinked: $file -> $dest_file"
+                ((files_processed++)) || true
+            else
+                echo "Error softlinking: $file -> $dest_file" | tee -a "$log_file"
+            fi
+            ;;
+        cp|*)
+            if cp -p "$file" "$dest_file"; then
+                [[ "$VERBOSE" == true ]] && echo "Copied: $file -> $dest_file"
+                ((files_processed++)) || true
+            else
+                echo "Error copying: $file -> $dest_file" | tee -a "$log_file"
+            fi
+            ;;
+    esac
 }
 
 export -f process_file

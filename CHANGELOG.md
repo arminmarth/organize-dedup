@@ -2,6 +2,50 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.0] - 2025-12-03
+
+### ✨ New Features
+
+#### Link Support
+- **Hardlink action** (`--action hardlink`) - Create hard links for zero-copy organization
+  - Same data, multiple names, zero additional disk space
+  - Original files preserved in original location
+  - Must be on same filesystem (partition/drive)
+  - Changes propagate to both locations (shared inode)
+  
+- **Softlink action** (`--action softlink`) - Create symbolic links
+  - Works across different filesystems
+  - Minimal disk space (just pointer)
+  - Broken if original deleted
+  - Changes propagate to both locations
+
+- **Action aliases** - Support for `ln`, `symlink`, `ln-s` as aliases
+
+#### Extension Filtering
+- **--only-mismatched-extensions** flag - Process ONLY files with wrong extensions
+  - Reverse of `--strict-extensions`
+  - Enables separating correct and incorrect files into different folders
+  - Perfect for organizing files that need extension correction
+  - Use with `--fix-extensions` to correct them
+
+### 📝 Documentation
+- **LINK_TYPES.md** - Comprehensive guide to link types
+  - Detailed comparison of cp, mv, hardlink, softlink
+  - Use cases and examples
+  - Important warnings and limitations
+  - Technical details (inodes, filesystems)
+  
+- **README updates** - Link types section with quick comparison table
+- **Help text updates** - Improved action descriptions
+
+### 📦 Use Cases Enabled
+- Dual organization structures with zero disk space
+- Separate correct and incorrect extension files
+- Cross-filesystem organization with softlinks
+- Test organization without moving files
+
+---
+
 ## [2.1.2] - 2025-12-03
 
 ### ✨ UX Improvements

@@ -1,7 +1,7 @@
 # organize-dedup
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-2.1.2-blue)](https://github.com/arminmarth/organize-dedup/releases)
+[![Version](https://img.shields.io/badge/version-2.2.0-blue)](https://github.com/arminmarth/organize-dedup/releases)
 
 A comprehensive file organization and deduplication tool with multiple modes, hash algorithms, and flexible organization methods.
 
@@ -14,6 +14,7 @@ A comprehensive file organization and deduplication tool with multiple modes, ha
 - **📂 Smart Categorization** - 13 categories (images, videos, documents, etc.)
 - **🔐 Multiple Hash Algorithms** - SHA1, SHA256, SHA512, MD5
 - **✨ Extension Correction** - Detect and fix wrong file extensions using MIME type detection (NEW in v2.1.0)
+- **🔗 Link Support** - Hardlink and softlink options for zero-copy organization (NEW in v2.2.0)
 - **🐳 Docker Support** - Containerized deployment with Makefile
 - **⚙️ Flexible Configuration** - Multiple modes, naming formats, organization methods
 
@@ -91,6 +92,12 @@ chmod +x organize_and_dedup.sh
 # Move files instead of copy
 ./organize_and_dedup.sh --action mv -i /input -o /output
 
+# Hardlink files (zero disk space, same filesystem required) (NEW in v2.2.0)
+./organize_and_dedup.sh --action hardlink -i /photos -o /organized
+
+# Softlink files (works across filesystems) (NEW in v2.2.0)
+./organize_and_dedup.sh --action softlink -i /external/files -o /organized
+
 # Verbose output
 ./organize_and_dedup.sh -v -i /input -o /output
 
@@ -102,6 +109,9 @@ chmod +x organize_and_dedup.sh
 
 # Skip files with wrong extensions (strict mode)
 ./organize_and_dedup.sh --strict-extensions -i /input -o /output
+
+# Only process files with wrong extensions (NEW in v2.2.0)
+./organize_and_dedup.sh --only-mismatched-extensions --fix-extensions -i /input -o /output
 ```
 
 ## Configuration Options
@@ -346,6 +356,81 @@ original_path,current_ext,detected_ext,mime_type,hash,action
 # Only process correctly-named files
 ./organize_and_dedup.sh --strict-extensions -i /input -o /output
 ```
+
+## Link Types (NEW in v2.2.0)
+
+The script supports four action types for handling files: **copy**, **move**, **hardlink**, and **softlink**.
+
+### Quick Comparison
+
+| Action | Disk Space | Original Preserved | Same Filesystem Required | Changes Propagate |
+|--------|------------|-------------------|-------------------------|------------------|
+| **cp** | 2x (doubles) | Yes | No | No |
+| **mv** | 1x (no change) | No (moved) | No | N/A |
+| **hardlink** | 1x (shared) | Yes | **Yes** | **Yes** |
+| **softlink** | ~1x (pointer) | Yes | No | **Yes** |
+
+### When to Use Each
+
+**Copy (`--action cp`)** - Default, safest option
+- ✅ Original files untouched
+- ✅ Works across different filesystems
+- ❌ Doubles disk space
+
+**Move (`--action mv`)** - Permanent reorganization
+- ✅ No additional disk space
+- ✅ Cleans up source directory
+- ❌ Original files removed
+
+**Hardlink (`--action hardlink`)** - Zero-copy organization
+- ✅ **Zero additional disk space** (same data, multiple names)
+- ✅ Original files preserved in original location
+- ✅ Fast operation
+- ❌ **Must be on same filesystem** (same partition/drive)
+- ⚠️ **Changes affect both locations** (shared inode)
+
+**Softlink (`--action softlink`)** - Cross-filesystem pointers
+- ✅ Works across different filesystems
+- ✅ Minimal disk space (just pointer)
+- ✅ Original files preserved
+- ❌ **Broken if original deleted**
+- ⚠️ **Changes affect both locations** (points to original)
+
+### Example Use Cases
+
+**Dual organization with zero disk space:**
+```bash
+# Keep originals + create organized structure, zero additional space
+./organize_and_dedup.sh --action hardlink -i /photos -o /organized
+# Now have both /photos (original) and /organized (by category/date)
+```
+
+**Separate correct and incorrect extensions:**
+```bash
+# Extract only files with wrong extensions (and fix them)
+./organize_and_dedup.sh --action hardlink --only-mismatched-extensions --fix-extensions \
+  -i /files -o /corrected
+
+# Extract only files with correct extensions
+./organize_and_dedup.sh --action hardlink --strict-extensions \
+  -i /files -o /already_correct
+```
+
+**Cross-filesystem organization:**
+```bash
+# Link to files on external drive
+./organize_and_dedup.sh --action softlink -i /external/photos -o /home/organized
+```
+
+### Important Warnings
+
+⚠️ **Hardlink Checksum Warning:** If you modify a file in one location, it changes in BOTH locations (same inode). This changes the hash, which may cause deduplication issues.
+
+⚠️ **Softlink Broken Link Warning:** If you delete the original file, softlinks become broken. Only use when originals are permanent.
+
+⚠️ **Filesystem Limitation:** Hardlinks only work within the same filesystem. Check with `df /input /output`.
+
+For detailed information, see [LINK_TYPES.md](LINK_TYPES.md).
 
 ## Performance
 
