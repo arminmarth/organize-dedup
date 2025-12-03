@@ -14,7 +14,7 @@ set -euo pipefail
 
 # ==================== VERSION ====================
 
-VERSION="2.1.0"
+VERSION="2.1.1"
 
 # ==================== DEFAULT CONFIGURATION ====================
 
@@ -107,9 +107,10 @@ PROCESSING OPTIONS:
     --deduplicate BOOL         Enable deduplication: yes, no [default: yes]
 
 EXTENSION CORRECTION OPTIONS:
-    --fix-extensions BOOL      Detect and correct file extensions: yes, no [default: no]
-    --strict-extensions BOOL   Only process files with correct extensions: yes, no [default: no]
-    --report-extensions BOOL   Generate extension mismatch report only: yes, no [default: no]
+    --fix-extensions yes|no    Automatically correct wrong extensions based on content [default: no]
+    --strict-extensions yes|no Skip files with incorrect extensions [default: no]
+    --report-extensions yes|no Generate mismatch report without processing [default: no]
+                               Note: These options require 'yes' or 'no' value
 
 TOOL OPTIONS:
     --strict-tools BOOL        Require all tools: yes, no [default: no]
@@ -135,6 +136,12 @@ EXAMPLES:
 
     # Move files instead of copy
     organize_and_dedup.sh -i /input -o /output --action mv
+
+    # Fix wrong file extensions automatically
+    organize_and_dedup.sh -i /input -o /output --fix-extensions yes
+
+    # Generate report of extension mismatches
+    organize_and_dedup.sh -i /input -o /output --report-extensions yes
 
     # Legacy format (still supported)
     organize_and_dedup.sh /input /output
@@ -714,7 +721,8 @@ detect_correct_extension() {
     fi
     
     # Look up correct extension from MIME type
-    local correct_ext="${MIME_TO_EXT[$mime_type]}"
+    # Use parameter expansion to safely check if key exists (Bash 4.2+ compatible)
+    local correct_ext="${MIME_TO_EXT[$mime_type]:-}"
     
     if [[ -n "$correct_ext" ]]; then
         echo "$correct_ext"

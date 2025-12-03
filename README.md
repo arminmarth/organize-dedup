@@ -1,7 +1,7 @@
 # organize-dedup
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-2.1.0-blue)](https://github.com/arminmarth/organize-dedup/releases)
+[![Version](https://img.shields.io/badge/version-2.1.1-blue)](https://github.com/arminmarth/organize-dedup/releases)
 
 A comprehensive file organization and deduplication tool with multiple modes, hash algorithms, and flexible organization methods.
 

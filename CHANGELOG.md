@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.1] - 2025-12-03
+
+### 🐛 Bug Fixes
+- **Fixed "unbound variable" error** - Changed MIME type lookup to use `${MIME_TO_EXT[$mime_type]:-}` instead of direct array access
+  - Now compatible with Bash 4.2+ (previous fix required Bash 4.3+)
+  - Gracefully handles unknown MIME types by falling back to current extension
+  - Prevents script crashes when encountering MIME types not in mapping table
+
+### 📝 Documentation
+- **Improved help text** for extension correction options
+  - Clarified that options require 'yes' or 'no' value
+  - Changed `BOOL` to `yes|no` for better clarity
+  - Added usage examples for extension correction in help text
+  - Added note about value requirement
+
+### 🧪 Testing
+- Verified fix with Office Open XML documents (.docx, .xlsx, .pptx)
+- Tested with unknown MIME types (application/octet-stream)
+- Confirmed fallback behavior works correctly
+
+---
+
 ## [2.1.0] - 2025-12-03
 
 ### ✨ New Features
