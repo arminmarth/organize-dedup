@@ -1,7 +1,7 @@
 # organize-dedup
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-2.0.1-blue)](https://github.com/arminmarth/organize-dedup/releases)
+[![Version](https://img.shields.io/badge/version-2.1.0-blue)](https://github.com/arminmarth/organize-dedup/releases)
 
 A comprehensive file organization and deduplication tool with multiple modes, hash algorithms, and flexible organization methods.
 
@@ -13,6 +13,7 @@ A comprehensive file organization and deduplication tool with multiple modes, ha
 - **📅 Date-Based Organization** - Organize files by date using EXIF metadata
 - **📂 Smart Categorization** - 13 categories (images, videos, documents, etc.)
 - **🔐 Multiple Hash Algorithms** - SHA1, SHA256, SHA512, MD5
+- **✨ Extension Correction** - Detect and fix wrong file extensions using MIME type detection (NEW in v2.1.0)
 - **🐳 Docker Support** - Containerized deployment with Makefile
 - **⚙️ Flexible Configuration** - Multiple modes, naming formats, organization methods
 
@@ -92,6 +93,15 @@ chmod +x organize_and_dedup.sh
 
 # Verbose output
 ./organize_and_dedup.sh -v -i /input -o /output
+
+# Fix wrong file extensions automatically (NEW in v2.1.0)
+./organize_and_dedup.sh --fix-extensions yes -i /input -o /output
+
+# Generate report of extension mismatches without processing
+./organize_and_dedup.sh --report-extensions yes -i /input -o /output
+
+# Skip files with wrong extensions (strict mode)
+./organize_and_dedup.sh --strict-extensions yes -i /input -o /output
 ```
 
 ## Configuration Options
@@ -137,6 +147,13 @@ chmod +x organize_and_dedup.sh
 | `--extract-archives` | `yes`, `no` | `yes` (advanced), `no` (simple) | Extract archives |
 | `--recursive` | `yes`, `no` | `yes` (advanced), `no` (simple) | Process subdirectories |
 | `--deduplicate` | `yes`, `no` | `yes` | Enable deduplication |
+
+### Extension Correction Options (NEW in v2.1.0)
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `--fix-extensions` | `yes`, `no` | `no` | Detect and correct file extensions based on MIME type |
+| `--strict-extensions` | `yes`, `no` | `no` | Skip files with incorrect extensions |
+| `--report-extensions` | `yes`, `no` | `no` | Generate extension mismatch report only (no processing) |
 
 ### Output Options
 | Option | Description |
@@ -250,6 +267,85 @@ The tool uses a **persistent hash registry** to track unique files across multip
 - Save disk space
 - Consistent across runs
 - Works with any hash algorithm
+
+## Extension Correction (NEW in v2.1.0)
+
+The tool can detect and correct file extensions based on actual file content using MIME type detection.
+
+### How It Works
+
+1. **Detection** - Uses `file --mime-type` to analyze file content
+2. **Mapping** - Matches MIME type to correct extension (100+ file types supported)
+3. **Action** - Corrects, reports, or skips based on selected mode
+
+### Three Modes
+
+**Fix Mode** (`--fix-extensions yes`)
+- Automatically corrects wrong extensions
+- Uses detected extension in output filename
+- Generates CSV report of all corrections
+- Example: `document.jpg` (actually PDF) → `...hash....pdf`
+
+**Report Mode** (`--report-extensions yes`)
+- Scans files and generates mismatch report
+- Does not process or organize files
+- Useful for auditing file collections
+- Creates `extension_mismatches.csv` in output directory
+
+**Strict Mode** (`--strict-extensions yes`)
+- Skips files with incorrect extensions
+- Only processes files with correct extensions
+- Useful for quality control
+- Generates report of skipped files
+
+### Supported File Types
+
+The extension correction feature supports 100+ file types including:
+
+- **Documents:** PDF, Word, Excel, PowerPoint, ODT, RTF
+- **Archives:** ZIP, RAR, 7Z, TAR, GZIP, BZIP2
+- **Images:** JPEG, PNG, GIF, BMP, TIFF, WebP, SVG
+- **Video:** MP4, MKV, AVI, MOV, WebM
+- **Audio:** MP3, FLAC, WAV, OGG, AAC
+- **Code:** Python, JavaScript, Java, C/C++, Shell scripts
+- **Config:** JSON, XML, YAML, INI, TOML
+- **And many more...**
+
+### CSV Report Format
+
+The `extension_mismatches.csv` report includes:
+
+```csv
+original_path,current_ext,detected_ext,mime_type,hash,action
+/path/file.jpg,jpg,pdf,application/pdf,ABC123...,corrected
+```
+
+- `original_path` - Full path to the file
+- `current_ext` - Extension from filename
+- `detected_ext` - Correct extension based on content
+- `mime_type` - Detected MIME type
+- `hash` - File hash for tracking
+- `action` - "corrected" or "detected"
+
+### Use Cases
+
+**Audit File Collection**
+```bash
+# Generate report without processing
+./organize_and_dedup.sh --report-extensions yes -i /files -o /report
+```
+
+**Fix Misnamed Files**
+```bash
+# Automatically correct extensions
+./organize_and_dedup.sh --fix-extensions yes -i /messy -o /clean
+```
+
+**Quality Control**
+```bash
+# Only process correctly-named files
+./organize_and_dedup.sh --strict-extensions yes -i /input -o /output
+```
 
 ## Performance
 

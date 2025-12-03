@@ -1,6 +1,52 @@
-# Changelog
+# CHANGELOG
 
 All notable changes to this project will be documented in this file.
+
+## [2.1.0] - 2025-12-03
+
+### ✨ New Features
+- **Extension Correction** - Detect and fix wrong file extensions using MIME type detection
+  - `--fix-extensions` - Automatically correct extensions based on file content
+  - `--strict-extensions` - Skip files with incorrect extensions
+  - `--report-extensions` - Generate mismatch report without processing
+  - Supports 100+ file types (documents, archives, images, video, audio, code, configs)
+  - Uses `file --mime-type` for accurate content detection
+  - Generates CSV report: `extension_mismatches.csv`
+
+### 📊 Statistics
+- **Extension correction tracking** - New counters in summary output:
+  - `Extensions corrected` - Number of files with corrected extensions
+  - `Extension mismatches detected` - Total mismatches found
+
+### 📝 Reporting
+- **CSV mismatch report** - Detailed report of extension mismatches:
+  - Columns: original_path, current_ext, detected_ext, mime_type, hash, action
+  - Generated when any extension correction flag is used
+  - Path shown in completion summary
+
+### 🔧 Implementation
+- Added `detect_correct_extension()` function with comprehensive MIME type mapping
+- Integrated extension detection into `process_file()` workflow
+- Extension correction works in both simple and advanced modes
+- Deduplication correctly handles files with different extensions
+- File content integrity preserved during correction
+
+### 🧪 Testing
+All test cases passed:
+- ✅ Report mode detects mismatches without processing
+- ✅ Fix mode corrects extensions and preserves content
+- ✅ Strict mode skips files with wrong extensions
+- ✅ Duplicate handling works with extension correction
+- ✅ Simple mode compatibility verified
+- ✅ Binary file detection (gzip, etc.) works correctly
+
+### 📚 Documentation
+- Updated README.md with extension correction features
+- Added examples for all three modes
+- Documented CSV report format
+- Added use cases and supported file types
+
+---
 
 ## [2.0.2] - 2025-12-02
 
