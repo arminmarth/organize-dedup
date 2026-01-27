@@ -49,6 +49,11 @@ if [[ $# -ne 2 ]]; then
     exit 1
 fi
 
+if [[ -z "${BASH_VERSINFO:-}" || "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+    echo "Error: bash 4.0 or newer is required to run this script." >&2
+    exit 1
+fi
+
 INPUT_DIR="${1%/}"
 OUTPUT_DIR="${2%/}"
 
