@@ -249,18 +249,18 @@ process_file() {
     target_file="$target_dir/$hash.$extension"
 
     if [[ -e "$target_file" ]]; then
-        ((skipped++))
+        ((++skipped))
         log "Skipping (already exists): $target_file"
         return 0
     fi
 
     if ! ln -- "$file" "$target_file"; then
-        ((failed++))
+        ((++failed))
         warn "failed to hardlink '$file' -> '$target_file'."
         return 0
     fi
 
-    ((linked++))
+    ((++linked))
     log "Linked to: $target_file"
 }
 
@@ -275,7 +275,7 @@ if [[ "$OUTPUT_DIR" == "$INPUT_DIR" || "$OUTPUT_DIR" == "$INPUT_DIR"/* ]]; then
 fi
 
 while IFS= read -r -d '' file; do
-    ((processed++))
+    ((++processed))
     process_file "$file"
 done < <("${find_cmd[@]}" -print0)
 
