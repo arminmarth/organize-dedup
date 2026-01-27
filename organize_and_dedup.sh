@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -uo pipefail
 
 VERSION="1.0.0"
 
@@ -24,6 +24,11 @@ Options:
   -h, --help     Show this help message.
   -v, --version  Show the script version.
 USAGE
+}
+
+cleanup_on_interrupt() {
+    warn "Interrupted. Processed: $processed, linked: $linked, skipped: $skipped, duplicates: $duplicates, warnings: $failed"
+    exit 130
 }
 
 if [[ $# -eq 1 ]]; then
@@ -52,12 +57,29 @@ if [[ ! -d "$INPUT_DIR" ]]; then
     exit 1
 fi
 
+if [[ -e "$OUTPUT_DIR" && ! -d "$OUTPUT_DIR" ]]; then
+    echo "Error: output path exists and is not a directory: $OUTPUT_DIR" >&2
+    exit 1
+fi
+
+if [[ "$INPUT_DIR" == "$OUTPUT_DIR" ]]; then
+    echo "Error: input and output directories must be different." >&2
+    exit 1
+fi
+
 STAT_CMD="stat"
 if command -v gstat >/dev/null 2>&1; then
     STAT_CMD="gstat"
 fi
 
-for cmd in file sha256sum "$STAT_CMD" date; do
+HASH_CMD="sha256sum"
+if ! command -v "$HASH_CMD" >/dev/null 2>&1; then
+    if command -v shasum >/dev/null 2>&1; then
+        HASH_CMD="shasum"
+    fi
+fi
+
+for cmd in file "$HASH_CMD" "$STAT_CMD" date; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         echo "Error: '$cmd' command not found." >&2
         exit 1
@@ -67,6 +89,15 @@ done
 log "Starting organize_and_dedup.sh $VERSION"
 log "Input directory: $INPUT_DIR"
 log "Output directory: $OUTPUT_DIR"
+log "Hash command: $HASH_CMD"
+
+mkdir -p -- "$OUTPUT_DIR"
+if [[ ! -w "$OUTPUT_DIR" ]]; then
+    echo "Error: output directory is not writable: $OUTPUT_DIR" >&2
+    exit 1
+fi
+
+trap cleanup_on_interrupt INT TERM
 
 get_year_month_from_exif() {
     local file="$1"
@@ -120,6 +151,10 @@ get_stat_timestamp() {
 
 format_timestamp() {
     local timestamp="$1"
+    if [[ -z "$timestamp" || "$timestamp" == "0" || "$timestamp" == "-1" ]]; then
+        date "+%Y-%m"
+        return
+    fi
     if command -v gdate >/dev/null 2>&1; then
         gdate -d "@$timestamp" "+%Y-%m"
         return
@@ -129,6 +164,17 @@ format_timestamp() {
         return
     fi
     date -r "$timestamp" "+%Y-%m"
+}
+
+hash_file() {
+    local file="$1"
+    local output
+    if [[ "$HASH_CMD" == "sha256sum" ]]; then
+        output=$(sha256sum -- "$file" 2>/dev/null || true)
+    else
+        output=$(shasum -a 256 -- "$file" 2>/dev/null || true)
+    fi
+    printf '%s' "${output%% *}"
 }
 
 normalize_extension() {
@@ -229,8 +275,15 @@ process_file() {
     local hash
     local target_dir
     local target_file
+    local action
 
     log "Processing: $file"
+
+    if [[ ! -r "$file" ]]; then
+        ((++failed))
+        warn "unreadable file '$file'."
+        return 0
+    fi
 
     ext_category=$(get_extension_and_category "$file")
     extension=${ext_category%% *}
@@ -241,33 +294,83 @@ process_file() {
         year_month=$(get_year_month_from_stat "$file")
     fi
 
-    hash=$(sha256sum -- "$file" | awk '{print toupper($1)}')
+    hash=$(hash_file "$file")
+    if [[ -z "$hash" ]]; then
+        ((++failed))
+        warn "failed to compute hash for '$file'."
+        return 0
+    fi
+    hash=${hash^^}
+
+    if [[ -n "${seen_hashes[$hash]:-}" ]]; then
+        ((++duplicates))
+        log "Duplicate detected (already processed hash): $file"
+        return 0
+    fi
+
+    if [[ -n "${existing_hashes[$hash]:-}" ]]; then
+        ((++duplicates))
+        log "Duplicate detected (already in output): $file"
+        seen_hashes[$hash]="${existing_hashes[$hash]}"
+        return 0
+    fi
 
     target_dir="$OUTPUT_DIR/$category/$year_month"
-    mkdir -p -- "$target_dir"
+    if ! mkdir -p -- "$target_dir"; then
+        ((++failed))
+        warn "failed to create directory '$target_dir'."
+        return 0
+    fi
 
     target_file="$target_dir/$hash.$extension"
 
     if [[ -e "$target_file" ]]; then
-        ((++skipped))
-        log "Skipping (already exists): $target_file"
+        ((++duplicates))
+        log "Duplicate detected (already exists): $target_file"
+        seen_hashes[$hash]="$target_file"
         return 0
     fi
 
-    if ! ln -- "$file" "$target_file"; then
-        ((++failed))
-        warn "failed to hardlink '$file' -> '$target_file'."
+    if compgen -G "$target_dir/$hash.*" >/dev/null; then
+        ((++duplicates))
+        log "Duplicate detected (same hash in directory): $file"
+        seen_hashes[$hash]="$target_dir/$hash.*"
         return 0
+    fi
+
+    action="Linked"
+    if ! ln -- "$file" "$target_file"; then
+        warn "hardlink failed for '$file' -> '$target_file', attempting copy."
+        if ! cp -p -- "$file" "$target_file"; then
+            ((++failed))
+            warn "failed to copy '$file' -> '$target_file'."
+            return 0
+        fi
+        action="Copied"
     fi
 
     ((++linked))
-    log "Linked to: $target_file"
+    seen_hashes[$hash]="$target_file"
+    log "$action to: $target_file"
 }
 
 processed=0
 linked=0
 skipped=0
+duplicates=0
 failed=0
+declare -A existing_hashes=()
+declare -A seen_hashes=()
+
+if [[ -d "$OUTPUT_DIR" ]]; then
+    while IFS= read -r -d '' existing_file; do
+        base_name=${existing_file##*/}
+        hash_candidate=${base_name%%.*}
+        if [[ "$hash_candidate" =~ ^[0-9A-Fa-f]{64}$ ]]; then
+            existing_hashes[${hash_candidate^^}]="$existing_file"
+        fi
+    done < <(find "$OUTPUT_DIR" -type f -print0)
+fi
 
 find_cmd=(find "$INPUT_DIR" -type f)
 if [[ "$OUTPUT_DIR" == "$INPUT_DIR" || "$OUTPUT_DIR" == "$INPUT_DIR"/* ]]; then
@@ -279,4 +382,4 @@ while IFS= read -r -d '' file; do
     process_file "$file"
 done < <("${find_cmd[@]}" -print0)
 
-log "Completed. Processed: $processed, linked: $linked, skipped: $skipped, warnings: $failed"
+log "Completed. Processed: $processed, linked: $linked, skipped: $skipped, duplicates: $duplicates, warnings: $failed"
