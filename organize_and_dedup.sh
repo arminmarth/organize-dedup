@@ -4,6 +4,14 @@ set -euo pipefail
 
 VERSION="1.0.0"
 
+log() {
+    printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*"
+}
+
+warn() {
+    printf '[%s] Warning: %s\n' "$(date '+%H:%M:%S')" "$*" >&2
+}
+
 usage() {
     cat <<'USAGE'
 Usage: organize_and_dedup.sh <input_dir> <output_dir>
@@ -55,6 +63,10 @@ for cmd in file sha256sum "$STAT_CMD" date; do
         exit 1
     fi
 done
+
+log "Starting organize_and_dedup.sh $VERSION"
+log "Input directory: $INPUT_DIR"
+log "Output directory: $OUTPUT_DIR"
 
 get_year_month_from_exif() {
     local file="$1"
@@ -143,7 +155,7 @@ get_extension_and_category() {
     desc=$(file -b -- "$file" 2>/dev/null || true)
 
     if [[ -z "$mime" ]]; then
-        echo "Warning: unable to read file type for '$file'." >&2
+        warn "unable to read file type for '$file'."
         echo "bin unknown"
         return 0
     fi
@@ -218,6 +230,8 @@ process_file() {
     local target_dir
     local target_file
 
+    log "Processing: $file"
+
     ext_category=$(get_extension_and_category "$file")
     extension=${ext_category%% *}
     category=${ext_category##* }
@@ -235,14 +249,25 @@ process_file() {
     target_file="$target_dir/$hash.$extension"
 
     if [[ -e "$target_file" ]]; then
+        ((skipped++))
+        log "Skipping (already exists): $target_file"
         return 0
     fi
 
     if ! ln -- "$file" "$target_file"; then
-        echo "Warning: failed to hardlink '$file' -> '$target_file'." >&2
+        ((failed++))
+        warn "failed to hardlink '$file' -> '$target_file'."
         return 0
     fi
+
+    ((linked++))
+    log "Linked to: $target_file"
 }
+
+processed=0
+linked=0
+skipped=0
+failed=0
 
 find_cmd=(find "$INPUT_DIR" -type f)
 if [[ "$OUTPUT_DIR" == "$INPUT_DIR" || "$OUTPUT_DIR" == "$INPUT_DIR"/* ]]; then
@@ -250,5 +275,8 @@ if [[ "$OUTPUT_DIR" == "$INPUT_DIR" || "$OUTPUT_DIR" == "$INPUT_DIR"/* ]]; then
 fi
 
 while IFS= read -r -d '' file; do
+    ((processed++))
     process_file "$file"
 done < <("${find_cmd[@]}" -print0)
+
+log "Completed. Processed: $processed, linked: $linked, skipped: $skipped, warnings: $failed"
