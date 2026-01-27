@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+VERSION="1.0.0"
+
 usage() {
     cat <<'USAGE'
 Usage: organize_and_dedup.sh <input_dir> <output_dir>
@@ -9,8 +11,25 @@ Usage: organize_and_dedup.sh <input_dir> <output_dir>
 Find files recursively in the input directory, detect their correct extension
 from MIME/magic, and hardlink them into category/YYYY-MM folders using a
 SHA256 filename.
+
+Options:
+  -h, --help     Show this help message.
+  -v, --version  Show the script version.
 USAGE
 }
+
+if [[ $# -eq 1 ]]; then
+    case "$1" in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -v|--version)
+            echo "organize_and_dedup.sh $VERSION"
+            exit 0
+            ;;
+    esac
+fi
 
 if [[ $# -ne 2 ]]; then
     usage
@@ -25,7 +44,12 @@ if [[ ! -d "$INPUT_DIR" ]]; then
     exit 1
 fi
 
-for cmd in file sha256sum stat date; do
+STAT_CMD="stat"
+if command -v gstat >/dev/null 2>&1; then
+    STAT_CMD="gstat"
+fi
+
+for cmd in file sha256sum "$STAT_CMD" date; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         echo "Error: '$cmd' command not found." >&2
         exit 1
@@ -57,11 +81,29 @@ get_year_month_from_exif() {
 get_year_month_from_stat() {
     local file="$1"
     local timestamp
-    timestamp=$(stat -c %W -- "$file" 2>/dev/null || echo 0)
+    timestamp=$(get_stat_timestamp "$file" "%W" "%B")
     if [[ "$timestamp" == "0" || "$timestamp" == "-1" ]]; then
-        timestamp=$(stat -c %Y -- "$file" 2>/dev/null || date +%s)
+        timestamp=$(get_stat_timestamp "$file" "%Y" "%m")
     fi
     format_timestamp "$timestamp"
+}
+
+get_stat_timestamp() {
+    local file="$1"
+    local gnu_flag="$2"
+    local bsd_flag="$3"
+
+    if "$STAT_CMD" -c "$gnu_flag" -- "$file" >/dev/null 2>&1; then
+        "$STAT_CMD" -c "$gnu_flag" -- "$file"
+        return
+    fi
+
+    if "$STAT_CMD" -f "$bsd_flag" -- "$file" >/dev/null 2>&1; then
+        "$STAT_CMD" -f "$bsd_flag" -- "$file"
+        return
+    fi
+
+    date +%s
 }
 
 format_timestamp() {
@@ -97,8 +139,14 @@ get_extension_and_category() {
     local mime
     local desc
 
-    mime=$(file --mime-type -b -- "$file")
-    desc=$(file -b -- "$file")
+    mime=$(file --mime-type -b -- "$file" 2>/dev/null || true)
+    desc=$(file -b -- "$file" 2>/dev/null || true)
+
+    if [[ -z "$mime" ]]; then
+        echo "Warning: unable to read file type for '$file'." >&2
+        echo "bin unknown"
+        return 0
+    fi
 
     case "$mime" in
         image/jpeg) echo "jpg images"; return 0 ;;
