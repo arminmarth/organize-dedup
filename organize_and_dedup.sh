@@ -7,7 +7,7 @@ usage() {
 Usage: organize_and_dedup.sh <input_dir> <output_dir>
 
 Find files recursively in the input directory, detect their correct extension
-from MIME/magic, and hardlink them into category/YYY-MM folders using a
+from MIME/magic, and hardlink them into category/YYYY-MM folders using a
 SHA256 filename.
 USAGE
 }
@@ -59,9 +59,22 @@ get_year_month_from_stat() {
     local timestamp
     timestamp=$(stat -c %W -- "$file" 2>/dev/null || echo 0)
     if [[ "$timestamp" == "0" || "$timestamp" == "-1" ]]; then
-        timestamp=$(stat -c %Y -- "$file")
+        timestamp=$(stat -c %Y -- "$file" 2>/dev/null || date +%s)
     fi
-    date -d "@$timestamp" "+%Y-%m"
+    format_timestamp "$timestamp"
+}
+
+format_timestamp() {
+    local timestamp="$1"
+    if command -v gdate >/dev/null 2>&1; then
+        gdate -d "@$timestamp" "+%Y-%m"
+        return
+    fi
+    if date -d "@$timestamp" "+%Y-%m" >/dev/null 2>&1; then
+        date -d "@$timestamp" "+%Y-%m"
+        return
+    fi
+    date -r "$timestamp" "+%Y-%m"
 }
 
 normalize_extension() {
@@ -169,7 +182,7 @@ process_file() {
     hash=$(sha256sum -- "$file" | awk '{print toupper($1)}')
 
     target_dir="$OUTPUT_DIR/$category/$year_month"
-    mkdir -p "$target_dir"
+    mkdir -p -- "$target_dir"
 
     target_file="$target_dir/$hash.$extension"
 
@@ -177,7 +190,10 @@ process_file() {
         return 0
     fi
 
-    ln -- "$file" "$target_file"
+    if ! ln -- "$file" "$target_file"; then
+        echo "Warning: failed to hardlink '$file' -> '$target_file'." >&2
+        return 0
+    fi
 }
 
 find_cmd=(find "$INPUT_DIR" -type f)
