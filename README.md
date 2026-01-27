@@ -1,63 +1,52 @@
 # organize-dedup
 
-A focused CLI tool for sorting unlabeled files into a clean structure by type and ensuring unique names via content hashes.
+`organize_and_dedup.sh` is a single-purpose shell script that scans an input
+folder, detects each file's real type, and hardlinks it into a clean,
+deduplicated output structure. The output layout is:
 
-## What it does
-
-- **Sorts files by type** using extensions (images, videos, documents, archives, etc.).
-- **Renames files by hash** to avoid collisions and make names consistent.
-- **Optionally deduplicates** by skipping files with the same content.
-
-## Repository contents
-
-This repository intentionally contains only the core script, this README, and the license to keep the focus on sorting unlabeled files.
-
-## Prerequisites
-
-**Debian/Ubuntu:**
-```bash
-sudo apt-get install coreutils file
+```
+<output_dir>/<category>/<YYYY-MM>/<SHA256>.<ext>
 ```
 
-**macOS:**
-```bash
-brew install coreutils
-```
+## What the script does
 
-## Quick start
+- **Recursively scans files** in the input directory.
+- **Detects type by content** using `file --mime-type`, not filenames.
+- **Normalizes extensions** (for example `jpeg` → `jpg`, `tiff` → `tiff`).
+- **Buckets by category** such as `images`, `videos`, `audio`, `documents`,
+  `archives`, `text`, `executables`, or `unknown`.
+- **Groups by month** using EXIF timestamps when available, falling back to
+  filesystem timestamps.
+- **Names by SHA-256** and **hardlinks** into the output folder so duplicates
+  collapse to a single target path.
+- **Skips duplicates** when the output filename already exists.
 
-```bash
-# organize the current directory into ./export
-./organize_and_dedup.sh -i . -o ./export
-```
+## Requirements
+
+The script expects these commands to be available:
+
+- `file`, `sha256sum`, `stat`, `date` (usually from coreutils)
+
+Optional:
+
+- `exiftool` for more accurate photo/video timestamps.
 
 ## Usage
 
 ```bash
-./organize_and_dedup.sh -i /path/to/input -o /path/to/output
+./organize_and_dedup.sh <input_dir> <output_dir>
 ```
 
-### Common flags
-
-| Option | Description |
-|--------|-------------|
-| `-i, --input-dir` | Input directory (defaults to current directory) |
-| `-o, --output-dir` | Output directory (defaults to `./export`) |
-| `--organize-by` | `extension` to group by extension or `none` for flat output |
-| `--naming-format` | `hash_ext` for `<hash>.<ext>` filenames |
-| `--deduplicate` | `yes` (default) or `no` to keep all files |
-| `-v, --verbose` | Verbose output |
-
-### Examples
+### Example
 
 ```bash
-# group by extension with hash-based names
-./organize_and_dedup.sh --organize-by extension --naming-format hash_ext -i /files -o /sorted
-
-# flat output, still deduplicated
-./organize_and_dedup.sh --organize-by none -i /files -o /flat
+# organize ~/Downloads into ~/MediaArchive
+./organize_and_dedup.sh ~/Downloads ~/MediaArchive
 ```
 
-## License
+## Notes
 
-MIT. See [LICENSE](LICENSE).
+- The script hardlinks files. Ensure the output directory is on the same
+  filesystem as the input for hardlinks to work.
+- If the output directory is inside the input directory, it is excluded from
+  the scan to avoid recursion.
