@@ -25,8 +25,8 @@ deduplicated output structure. The output layout is:
 
 The script expects these commands to be available:
 
-- `file`, `sha256sum`, `stat`, `date` (GNU coreutils; on macOS install
-  `coreutils` to get `gdate` for GNU-style `date -d`)
+- `file`, `sha256sum`, `stat`/`gstat`, `date` (GNU coreutils; on macOS install
+  `coreutils` to get `gdate` and `gstat` for GNU-style flags)
 
 Optional:
 
@@ -36,6 +36,10 @@ Optional:
 
 ```bash
 ./organize_and_dedup.sh <input_dir> <output_dir>
+```
+
+```bash
+./organize_and_dedup.sh --version
 ```
 
 ### Example
