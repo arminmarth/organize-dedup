@@ -73,8 +73,8 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --maxdepth)
-            if [[ -z "${2:-}" || "$2" == -* ]]; then
-                echo "Error: --maxdepth requires a numeric argument." >&2
+            if [[ -z "${2:-}" || "$2" == -* || ! "$2" =~ ^[0-9]+$ ]]; then
+                echo "Error: --maxdepth requires a positive integer argument." >&2
                 exit 1
             fi
             MAXDEPTH="$2"
@@ -82,6 +82,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --maxdepth=*)
             MAXDEPTH="${1#*=}"
+            if [[ ! "$MAXDEPTH" =~ ^[0-9]+$ ]]; then
+                echo "Error: --maxdepth requires a positive integer argument." >&2
+                exit 1
+            fi
             shift
             ;;
         --)
@@ -190,11 +194,11 @@ done
 
 # --- Preflight check: hardlink support (issue #33) ---
 check_hardlink_support() {
-    local test_a="$OUTPUT_DIR/.hardlink_test_a"
-    local test_b="$OUTPUT_DIR/.hardlink_test_b"
+    local test_a="$OUTPUT_DIR/.hardlink_probe_$$_$RANDOM"
+    local test_b="$test_a.link"
     touch -- "$test_a" 2>/dev/null
     if ! ln -- "$test_a" "$test_b" 2>/dev/null; then
-        rm -f -- "$test_a"
+        rm -f -- "$test_a" 2>/dev/null
         warn "output filesystem does not support hardlinks — files will be copied instead."
         return 1
     fi
@@ -210,10 +214,16 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
     log "DRY RUN — no files will be modified."
 fi
 
-mkdir -p -- "$OUTPUT_DIR"
-if [[ ! -w "$OUTPUT_DIR" ]]; then
-    echo "Error: output directory is not writable: $OUTPUT_DIR" >&2
-    exit 1
+# Create output dir only when not in dry-run mode (review feedback)
+if [[ "$DRY_RUN" -eq 0 ]]; then
+    mkdir -p -- "$OUTPUT_DIR"
+fi
+# In dry-run mode, skip writability check if output doesn't exist yet
+if [[ "$DRY_RUN" -eq 0 || -d "$OUTPUT_DIR" ]]; then
+    if [[ ! -w "$OUTPUT_DIR" ]]; then
+        echo "Error: output directory is not writable: $OUTPUT_DIR" >&2
+        exit 1
+    fi
 fi
 
 HARDLINK_OK=1
@@ -307,8 +317,7 @@ normalize_extension() {
         mov|qt) echo "mov" ;;
         mp3|mp2|mpga) echo "mp3" ;;
         oga|ogg) echo "ogg" ;;
-        # Issue #49: tgz is now handled in get_extension_and_category's filename
-        # fallback, so it never reaches normalize_extension. Branch removed.
+        tgz) echo "tar.gz" ;;
         *) echo "$ext" ;;
     esac
 }
@@ -424,7 +433,33 @@ get_extension_and_category() {
         application/x-plist) echo "plist config"; return 0 ;;
         text/calendar) echo "ics documents"; return 0 ;;
         text/vcard) echo "vcf documents"; return 0 ;;
-        text/plain) echo "txt text"; return 0 ;;
+        text/plain)
+            # Issue #37: filename-based fallback for code files that libmagic
+            # reports as text/plain (Go, Rust, TOML, Markdown, YAML, etc.)
+            local basename="${file##*/}"
+            local ext="${basename##*.}"
+            ext="${ext,,}"
+            if [[ "$ext" != "$basename" ]]; then
+                case "$ext" in
+                    py) echo "py code"; return 0 ;;
+                    js|mjs) echo "js code"; return 0 ;;
+                    ts) echo "ts code"; return 0 ;;
+                    go) echo "go code"; return 0 ;;
+                    rs) echo "rs code"; return 0 ;;
+                    rb) echo "rb code"; return 0 ;;
+                    java) echo "java code"; return 0 ;;
+                    c|h) echo "c code"; return 0 ;;
+                    cpp|cc|cxx) echo "cpp code"; return 0 ;;
+                    sh|bash|zsh) echo "sh code"; return 0 ;;
+                    sql) echo "sql text"; return 0 ;;
+                    md|markdown) echo "md text"; return 0 ;;
+                    yaml|yml) echo "yaml text"; return 0 ;;
+                    toml) echo "toml text"; return 0 ;;
+                    css) echo "css text"; return 0 ;;
+                    pl|pm) echo "pl code"; return 0 ;;
+                esac
+            fi
+            echo "txt text"; return 0 ;;
         text/csv) echo "csv text"; return 0 ;;
         text/x-env) echo "env text"; return 0 ;;
         text/x-php|application/x-httpd-php) echo "php code"; return 0 ;;
@@ -453,10 +488,11 @@ get_extension_and_category() {
         # file returns application/gzip for both .gz and .tar.gz — need to check
         # the description to distinguish
         application/gzip|application/x-gzip)
-            # Check if this is actually a tar.gz by looking at the file description
+            # Check if this is actually a tar.gz by decompressing and checking
+            # file -b only shows "gzip compressed data" — need -z to look inside
             local desc
-            desc=$(file -b -- "$file" 2>/dev/null || true)
-            if [[ "$desc" == *"tar archive"* || "$desc" == *"from Unix"* || "$desc" == *".tar"* ]]; then
+            desc=$(file -bz -- "$file" 2>/dev/null || true)
+            if [[ "$desc" == *"tar archive"* ]]; then
                 echo "tar.gz archives"
             else
                 echo "gz archives"
@@ -495,33 +531,6 @@ get_extension_and_category() {
         text/x-sql) echo "sql text"; return 0 ;;
         application/yaml|application/x-yaml) echo "yaml text"; return 0 ;;
     esac
-
-    # Issue #37: filename-based fallback for code files that file reports as text/plain
-    local basename="${file##*/}"
-    local ext="${basename##*.}"
-    ext="${ext,,}"
-    if [[ "$ext" != "$basename" ]]; then
-        case "$ext" in
-            py) echo "py code"; return 0 ;;
-            js|mjs) echo "js code"; return 0 ;;
-            ts) echo "ts code"; return 0 ;;
-            go) echo "go code"; return 0 ;;
-            rs) echo "rs code"; return 0 ;;
-            rb) echo "rb code"; return 0 ;;
-            java) echo "java code"; return 0 ;;
-            c|h) echo "c code"; return 0 ;;
-            cpp|cc|cxx) echo "cpp code"; return 0 ;;
-            sh|bash|zsh) echo "sh code"; return 0 ;;
-            sql) echo "sql text"; return 0 ;;
-            md|markdown) echo "md text"; return 0 ;;
-            yaml|yml) echo "yaml text"; return 0 ;;
-            toml) echo "toml text"; return 0 ;;
-            css) echo "css text"; return 0 ;;
-            pl|pm) echo "pl code"; return 0 ;;
-            # Issue #49: tgz in filename fallback so .tgz files map to tar.gz
-            tgz) echo "tar.gz archives"; return 0 ;;
-        esac
-    fi
 
     echo "bin unknown"
 }
