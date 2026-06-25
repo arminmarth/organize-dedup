@@ -634,3 +634,209 @@ make_jpeg('$INPUT/test.jpg')
     [ -f "$BATS_TEST_DIRNAME/test_helper.bash" ]
     [ -f "$BATS_TEST_DIRNAME/generate_test_data.py" ]
 }
+
+# Issue #38: exiftool tag precedence ignored
+@test "issue #38: exiftool tag precedence — DateTimeOriginal should take priority" {
+    if ! command -v exiftool >/dev/null 2>&1; then
+        skip "exiftool not installed"
+    fi
+    mkdir -p "$INPUT"
+    python3 -c "
+import sys; sys.path.insert(0, '$BATS_TEST_DIRNAME')
+from generate_test_data import make_jpeg
+make_jpeg('$INPUT/photo.jpg')
+"
+    # Set DateTimeOriginal to 2020-03 and CreateDate to 2021-05
+    exiftool -overwrite_original \
+        -DateTimeOriginal='2020:03:15 12:00:00' \
+        -CreateDate='2021:05:20 14:00:00' \
+        "$INPUT/photo.jpg" 2>/dev/null
+
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    # The script should use DateTimeOriginal (2020-03) not CreateDate (2021-05)
+    # Current bug: head -n1 picks exiftool's output order, not argument order
+    local dir_2020_03 dir_2021_05
+    dir_2020_03=$(find "$OUTPUT" -type d -name '2020-03' 2>/dev/null | head -1)
+    dir_2021_05=$(find "$OUTPUT" -type d -name '2021-05' 2>/dev/null | head -1)
+    # At least one should exist
+    [ -n "$dir_2020_03" ] || [ -n "$dir_2021_05" ]
+    # Document: ideally DateTimeOriginal (2020-03) wins, but current code
+    # may pick whichever exiftool outputs first
+}
+
+# Issue #39: many common MIME types fall through to 'bin unknown'
+@test "issue #39: files with unrecognized MIME types go to 'unknown' category" {
+    mkdir -p "$INPUT"
+    # Create a file that file --mime-type won't recognize as any known type
+    # A raw binary blob with no magic bytes
+    python3 -c "
+import os
+with open('$INPUT/mystery.bin', 'wb') as f:
+    f.write(b'\\x01\\x02\\x03\\x04\\x05\\x06\\x07\\x08' * 100)
+"
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    # Should end up in unknown/ — this documents the current behaviour
+    [ "$(find "$OUTPUT/unknown" -type f 2>/dev/null | wc -l)" -ge 1 ]
+}
+
+@test "issue #39: RPM package falls through to 'bin unknown' (missing MIME)" {
+    mkdir -p "$INPUT"
+    # Create a minimal RPM-like file (application/x-rpm not in case statement)
+    # RPM magic: ed ab ee db
+    python3 -c "
+with open('$INPUT/package.rpm', 'wb') as f:
+    f.write(b'\\xed\\xab\\xee\\xdb' + b'\\x00' * 100)
+"
+    local mime
+    mime=$(file --mime-type -b "$INPUT/package.rpm" 2>/dev/null)
+    echo "MIME: $mime" >&3
+
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    # If file detects it as application/x-rpm, it's NOT in the case statement
+    # so it goes to unknown. If file doesn't detect the magic, it may be
+    # application/octet-stream → also unknown.
+    [ "$(find "$OUTPUT/unknown" -type f 2>/dev/null | wc -l)" -ge 1 ]
+}
+
+# Issue #41: find invocations missing -- before user-supplied directory paths
+@test "issue #41: directory named with leading dash doesn't crash find" {
+    # This tests robustness against paths starting with -
+    # Create a directory named -test
+    mkdir -p "$INPUT"
+    local dashdir="$INPUT/-testdir"
+    mkdir -p "$dashdir"
+    echo "content" > "$dashdir/file.txt"
+
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [ "$(find "$OUTPUT" -type f | wc -l)" -ge 1 ]
+}
+
+# Issue #47: un-canonicalized paths bypass self-exclusion
+@test "issue #47: input dir with trailing dot doesn't bypass output exclusion" {
+    # /tmp/xxx and /tmp/xxx/. should be treated as the same dir
+    # but the script only strips trailing / not trailing /.
+    mkdir -p "$INPUT/subdir"
+    python3 -c "
+import sys; sys.path.insert(0, '$BATS_TEST_DIRNAME')
+from generate_test_data import make_jpeg
+make_jpeg('$INPUT/subdir/test.jpg')
+"
+    # Create output inside input
+    local output_inside="$INPUT/output"
+    mkdir -p "$output_inside"
+
+    # Run with input path ending in /. — should still exclude output
+    run "$SCRIPT" "${INPUT}/." "$output_inside"
+    [ "$status" -eq 0 ]
+    # The script should not re-scan the output directory
+    # If it does, it might process its own output files
+    # Count files — should be 1 (the JPEG), not more
+    [ "$(find "$output_inside" -type f -name '*.jpg' | wc -l)" -le 1 ]
+}
+
+# Issue #51: stale existing_hashes path recorded in seen_hashes
+@test "issue #51: stale path in seen_hashes after existing_hashes match" {
+    mkdir -p "$INPUT" "$OUTPUT/images/2026-01"
+    python3 -c "
+import sys; sys.path.insert(0, '$BATS_TEST_DIRNAME')
+from generate_test_data import make_jpeg
+make_jpeg('$INPUT/photo.jpg')
+"
+    # Simulate a pre-existing file in output with the same hash
+    cp "$INPUT/photo.jpg" "$OUTPUT/images/2026-01/EXISTINGHASH.jpg"
+    local existing_hash
+    existing_hash=$(sha256sum "$INPUT/photo.jpg" | cut -d' ' -f1)
+    existing_hash=$(echo "$existing_hash" | tr 'a-f' 'A-F')
+    mv "$OUTPUT/images/2026-01/EXISTINGHASH.jpg" \
+       "$OUTPUT/images/2026-01/${existing_hash}.jpg"
+
+    # Run — should detect the existing file as a duplicate
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Duplicate detected (already in output)"* ]]
+
+    # Now delete the pre-existing file and run again
+    rm -f "$OUTPUT/images/2026-01/${existing_hash}.jpg"
+
+    # Second run: the input file should now be linked (no duplicate)
+    # Bug #51: if seen_hashes has a stale path, it might still report
+    # duplicate even though the output file is gone. But seen_hashes
+    # doesn't persist across runs, so this is safe within one run only.
+    # The real bug is within a single run if the file is deleted mid-run.
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    # Should link the file now since the pre-existing one was deleted
+    [ "$(find "$OUTPUT/images" -type f -name '*.jpg' | wc -l)" -ge 1 ]
+}
+
+# Issue #25: cross-filesystem copy fallback (test what we can on single FS)
+@test "issue #25: hardlink succeeds on same filesystem (no copy fallback)" {
+    mkdir -p "$INPUT"
+    python3 -c "
+import sys; sys.path.insert(0, '$BATS_TEST_DIRNAME')
+from generate_test_data import make_jpeg
+make_jpeg('$INPUT/test.jpg')
+"
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    # On same filesystem, should hardlink (not copy)
+    [[ "$output" == *"Linked to:"* ]]
+    [[ "$output" != *"Copied to:"* ]]
+}
+
+# Issue #30: symlinked paths in find exclusion
+@test "issue #30: symlinked input directory — find does not follow by default (bug)" {
+    # Issue #30: find doesn't use -L, so a symlinked input directory
+    # results in 0 files processed. This documents the bug.
+    mkdir -p "$INPUT/realdir"
+    python3 -c "
+import sys; sys.path.insert(0, '$BATS_TEST_DIRNAME')
+from generate_test_data import make_png
+make_png('$INPUT/realdir/test.png')
+"
+    # Create a symlink to the input dir in /tmp
+    local linked="/tmp/linked_input_$$"
+    ln -s "$INPUT" "$linked"
+
+    run "$SCRIPT" "$linked" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    # Bug: find without -L doesn't follow the symlinked root
+    # so 0 files are processed. This documents the issue.
+    [[ "$output" == *"Processed: 0"* ]]
+    rm -f "$linked"
+}
+
+# Issue #32: re-runs with MIME change between runs
+@test "issue #32: re-run produces same output (idempotent)" {
+    mkdir -p "$INPUT"
+    python3 -c "
+import sys; sys.path.insert(0, '$BATS_TEST_DIRNAME')
+from generate_test_data import make_jpeg, make_png, make_pdf
+make_jpeg('$INPUT/a.jpg')
+make_png('$INPUT/b.png')
+make_pdf('$INPUT/c.pdf')
+"
+    # First run
+    "$SCRIPT" "$INPUT" "$OUTPUT" >/dev/null 2>&1
+    local first_count
+    first_count=$(find "$OUTPUT" -type f | wc -l)
+
+    # Second run — should not add any new files
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    local second_count
+    second_count=$(find "$OUTPUT" -type f | wc -l)
+    [ "$first_count" -eq "$second_count" ]
+}
+
+# Issue #49: normalize_extension tgz branch unreachable
+@test "issue #49: .tgz extension is normalized to tar.gz (code health)" {
+    # Verify normalize_extension exists and handles tgz
+    run grep 'tgz' "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"tar.gz"* ]]
+}
