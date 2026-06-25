@@ -150,7 +150,7 @@ make_json('$INPUT/test.json')
     [ "$(find "$OUTPUT/text" -name '*.json' -type f 2>/dev/null | wc -l)" -ge 1 ]
 }
 
-@test "Python files are categorized (issue #37: may be text or code depending on file magic)" {
+@test "Python files are categorized as code (issue #37 fixed)" {
     mkdir -p "$INPUT"
     python3 -c "
 import sys; sys.path.insert(0, '$BATS_TEST_DIRNAME')
@@ -159,11 +159,8 @@ make_python('$INPUT/test.py')
 "
     run "$SCRIPT" "$INPUT" "$OUTPUT"
     [ "$status" -eq 0 ]
-    # file --mime-type may return text/x-python, text/x-script.python, or text/plain
-    # depending on the magic database version. The script may classify it as
-    # code, text, or unknown. This test documents that the file is processed
-    # without error, regardless of classification.
-    [ "$(find "$OUTPUT" -type f | wc -l)" -ge 1 ]
+    # Fixed: text/x-script.python now handled + filename fallback for text/plain
+    [ "$(find "$OUTPUT/code" -name '*.py' -type f 2>/dev/null | wc -l)" -ge 1 ]
 }
 
 @test "Bash scripts are categorized as code" {
@@ -467,6 +464,7 @@ make_jpeg('$INPUT/test.jpg')
     [[ "$output" == *"Completed."* ]]
     [[ "$output" == *"Processed:"* ]]
     [[ "$output" == *"linked:"* ]]
+    [[ "$output" == *"copied:"* ]]
     [[ "$output" == *"duplicates:"* ]]
 }
 
@@ -516,8 +514,8 @@ make_jpeg('$INPUT/test.jpg')
 
 # --- Issue-specific regression tests ---
 
-# Issue #15: skipped counter never incremented
-@test "issue #15: skipped counter is present in summary (may be 0)" {
+# Issue #15: skipped counter now incremented for unreadable files and hash failures
+@test "issue #15: skipped counter is present in summary" {
     mkdir -p "$INPUT"
     echo "test" > "$INPUT/file.txt"
     run "$SCRIPT" "$INPUT" "$OUTPUT"
@@ -525,23 +523,42 @@ make_jpeg('$INPUT/test.jpg')
     [[ "$output" == *"skipped:"* ]]
 }
 
+@test "issue #15: skipped counter increments for unreadable files" {
+    mkdir -p "$INPUT"
+    echo "test" > "$INPUT/file.txt"
+    # Create an unreadable file
+    echo "secret" > "$INPUT/secret.txt"
+    chmod 000 "$INPUT/secret.txt"
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    # skipped should be 1 (the unreadable file)
+    [[ "$output" == *"skipped: 1"* ]]
+    # Clean up
+    chmod 644 "$INPUT/secret.txt"
+}
+
 # Issue #16: cleanup_on_interrupt exits 130 for SIGTERM (should be 143)
 # Skipped: SIGINT timing is unreliable in CI — the script may finish before
 # the signal arrives. The exit code issue is documented in the issue itself.
-@test "issue #16: cleanup_on_interrupt function exists and uses exit 130" {
-    # Verify the function is defined in the script
-    run grep -c 'cleanup_on_interrupt' "$SCRIPT"
+@test "issue #16: cleanup_on_interrupt uses exit 130 for INT, 143 for TERM (fixed)" {
+    # Verify the script has separate handlers for INT and TERM
+    run grep 'cleanup_on_interrupt' "$SCRIPT"
     [ "$status" -eq 0 ]
-    [[ "$output" -ge 2 ]]  # defined + used in trap
+    [[ "$output" == *"trap cleanup_on_interrupt INT"* ]]
+    run grep 'cleanup_on_term' "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"trap cleanup_on_term TERM"* ]]
     run grep 'exit 130' "$SCRIPT"
+    [ "$status" -eq 0 ]
+    run grep 'exit 143' "$SCRIPT"
     [ "$status" -eq 0 ]
 }
 
 # Issue #22: CI should actually test bash
 # (This is tested by the existence of this test suite itself)
 
-# Issue #34: tar.gz saved as .gz
-@test "issue #34: tar.gz files end up in archives (current behaviour: .gz ext)" {
+# Issue #34: tar.gz now saved with .tar.gz extension (fixed)
+@test "issue #34: tar.gz files are saved with .tar.gz extension (fixed)" {
     mkdir -p "$INPUT"
     python3 -c "
 import sys; sys.path.insert(0, '$BATS_TEST_DIRNAME')
@@ -550,16 +567,8 @@ make_targz('$INPUT/real.tar.gz')
 "
     run "$SCRIPT" "$INPUT" "$OUTPUT"
     [ "$status" -eq 0 ]
-    # Current behaviour: saved as .gz (the bug)
-    # Fix would save as .tar.gz
-    local gz_count
-    gz_count=$(find "$OUTPUT/archives" -name '*.gz' -type f | wc -l)
-    [ "$gz_count" -ge 1 ]
-    # Document: currently NO .tar.gz files are produced
-    local targz_count
-    targz_count=$(find "$OUTPUT/archives" -name '*.tar.gz' -type f | wc -l)
-    # This should be 0 with current code (the bug)
-    [ "$targz_count" -eq 0 ]
+    # Fixed: tar.gz now detected and saved with .tar.gz extension
+    [ "$(find "$OUTPUT/archives" -name '*.tar.gz' -type f | wc -l)" -ge 1 ]
 }
 
 # Issue #35: all empty files dedup to one
@@ -576,10 +585,8 @@ make_targz('$INPUT/real.tar.gz')
 }
 
 # Issue #37: code files misclassified as text/plain
-@test "issue #37: Python file is processed (classification depends on file magic version)" {
-    # file --mime-type may return text/x-python, text/x-script.python, or text/plain
-    # The script's case statement may not catch all variants → falls to bin unknown
-    # This test documents that the file IS processed without error.
+@test "issue #37: Python file classified as code (fixed)" {
+    # Fixed: text/x-script.python added to case statement + filename fallback
     mkdir -p "$INPUT"
     python3 -c "
 import sys; sys.path.insert(0, '$BATS_TEST_DIRNAME')
@@ -588,7 +595,7 @@ make_python('$INPUT/hello.py')
 "
     run "$SCRIPT" "$INPUT" "$OUTPUT"
     [ "$status" -eq 0 ]
-    [ "$(find "$OUTPUT" -type f | wc -l)" -ge 1 ]
+    [ "$(find "$OUTPUT/code" -name '*.py' -type f 2>/dev/null | wc -l)" -ge 1 ]
 }
 
 # Issue #45: MIME type not lowercased
@@ -606,25 +613,28 @@ make_text('$INPUT/plain.txt')
     [ "$(find "$OUTPUT" -type f | wc -l)" -ge 1 ]
 }
 
-# Issue #48: pre-existing files not following naming convention
-@test "issue #48: pre-existing non-hash-named files in output are not deduped against" {
+# Issue #48: pre-existing files not following naming convention are now hashed and deduped
+@test "issue #48: pre-existing non-hash-named files in output ARE deduped against (fixed)" {
     mkdir -p "$INPUT" "$OUTPUT/images/2026-01"
     python3 -c "
 import sys; sys.path.insert(0, '$BATS_TEST_DIRNAME')
 from generate_test_data import make_jpeg
 make_jpeg('$INPUT/test.jpg')
 "
-    # Create a pre-existing file with a non-hash name
+    # Create a pre-existing file with a non-hash name (same content as input)
     cp "$INPUT/test.jpg" "$OUTPUT/images/2026-01/my_photo.jpg"
 
     run "$SCRIPT" "$INPUT" "$OUTPUT"
     [ "$status" -eq 0 ]
-    # Current behaviour: the pre-existing file is NOT detected as a duplicate
-    # because it doesn't follow the <64hex>.<ext> naming convention.
-    # So the script will create a new hash-named file.
+    # Fixed: the pre-existing file IS now detected as a duplicate because
+    # the script hashes pre-existing files that don't follow <64hex>.<ext> naming.
+    # So the script should NOT create a new hash-named file.
+    [[ "$output" == *"Duplicate detected (already in output)"* ]]
     local hash_files
-    hash_files=$(find "$OUTPUT" -name '*.jpg' -regextype posix-extended -regex '.*/[0-9A-Fa-f]{64}\.jpg' | wc -l)
-    [ "$hash_files" -ge 1 ]
+    hash_files=$(find "$OUTPUT" -name '*.jpg' -regextype posix-extended -regex '.*/[0-9A-Fa-f]{64}\\.jpg' | wc -l)
+    [ "$hash_files" -eq 0 ]
+    # The pre-existing file should still be there
+    [ -f "$OUTPUT/images/2026-01/my_photo.jpg" ]
 }
 
 # Issue #22: no actual testing in CI
@@ -681,9 +691,9 @@ with open('$INPUT/mystery.bin', 'wb') as f:
     [ "$(find "$OUTPUT/unknown" -type f 2>/dev/null | wc -l)" -ge 1 ]
 }
 
-@test "issue #39: RPM package falls through to 'bin unknown' (missing MIME)" {
+@test "issue #39: RPM package now correctly classified as archive (fixed)" {
     mkdir -p "$INPUT"
-    # Create a minimal RPM-like file (application/x-rpm not in case statement)
+    # Create a minimal RPM-like file (application/x-rpm)
     # RPM magic: ed ab ee db
     python3 -c "
 with open('$INPUT/package.rpm', 'wb') as f:
@@ -695,10 +705,8 @@ with open('$INPUT/package.rpm', 'wb') as f:
 
     run "$SCRIPT" "$INPUT" "$OUTPUT"
     [ "$status" -eq 0 ]
-    # If file detects it as application/x-rpm, it's NOT in the case statement
-    # so it goes to unknown. If file doesn't detect the magic, it may be
-    # application/octet-stream → also unknown.
-    [ "$(find "$OUTPUT/unknown" -type f 2>/dev/null | wc -l)" -ge 1 ]
+    # Fixed: application/x-rpm is now in the case statement → archives
+    [ "$(find "$OUTPUT/archives" -type f 2>/dev/null | wc -l)" -ge 1 ]
 }
 
 # Issue #41: find invocations missing -- before user-supplied directory paths
@@ -786,12 +794,20 @@ make_jpeg('$INPUT/test.jpg')
     # On same filesystem, should hardlink (not copy)
     [[ "$output" == *"Linked to:"* ]]
     [[ "$output" != *"Copied to:"* ]]
+    # copied count should be 0 on same filesystem
+    [[ "$output" == *"copied: 0"* ]]
+}
+
+@test "issue #25: loud WARNING prefix in copy fallback message" {
+    # Verify the script has the loud WARNING prefix for copy fallback
+    run grep 'WARNING.*hardlink' "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"COPIED, not hardlinked"* ]]
 }
 
 # Issue #30: symlinked paths in find exclusion
-@test "issue #30: symlinked input directory — find does not follow by default (bug)" {
-    # Issue #30: find doesn't use -L, so a symlinked input directory
-    # results in 0 files processed. This documents the bug.
+@test "issue #30: symlinked input directory is now resolved via realpath (fixed)" {
+    # Fixed: realpath resolves symlinks before passing to find
     mkdir -p "$INPUT/realdir"
     python3 -c "
 import sys; sys.path.insert(0, '$BATS_TEST_DIRNAME')
@@ -804,9 +820,8 @@ make_png('$INPUT/realdir/test.png')
 
     run "$SCRIPT" "$linked" "$OUTPUT"
     [ "$status" -eq 0 ]
-    # Bug: find without -L doesn't follow the symlinked root
-    # so 0 files are processed. This documents the issue.
-    [[ "$output" == *"Processed: 0"* ]]
+    # Fixed: realpath resolves the symlink, find gets the real path
+    [ "$(find "$OUTPUT/images" -name '*.png' -type f | wc -l)" -ge 1 ]
     rm -f "$linked"
 }
 
@@ -839,4 +854,135 @@ make_pdf('$INPUT/c.pdf')
     run grep 'tgz' "$SCRIPT"
     [ "$status" -eq 0 ]
     [[ "$output" == *"tar.gz"* ]]
+}
+
+# --- New feature tests (--dry-run, --quiet, --maxdepth) ---
+
+@test "--dry-run mode previews without creating files" {
+    mkdir -p "$INPUT"
+    python3 -c "
+import sys; sys.path.insert(0, '$BATS_TEST_DIRNAME')
+from generate_test_data import make_jpeg
+make_jpeg('$INPUT/test.jpg')
+"
+    run "$SCRIPT" --dry-run "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"DRY RUN"* ]]
+    [[ "$output" == *"[DRY RUN] Would link to:"* ]]
+    # No files should be created
+    [ "$(find "$OUTPUT" -type f 2>/dev/null | wc -l)" -eq 0 ]
+}
+
+@test "--dry-run with -n short flag" {
+    mkdir -p "$INPUT"
+    python3 -c "
+import sys; sys.path.insert(0, '$BATS_TEST_DIRNAME')
+from generate_test_data import make_png
+make_png('$INPUT/test.png')
+"
+    run "$SCRIPT" -n "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"DRY RUN"* ]]
+    [ "$(find "$OUTPUT" -type f 2>/dev/null | wc -l)" -eq 0 ]
+}
+
+@test "--quiet mode suppresses per-file output" {
+    mkdir -p "$INPUT"
+    python3 -c "
+import sys; sys.path.insert(0, '$BATS_TEST_DIRNAME')
+from generate_test_data import make_jpeg
+make_jpeg('$INPUT/test.jpg')
+"
+    run "$SCRIPT" --quiet "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    # Should have Starting/Completed lines but no "Processing:" or "Linked to:"
+    [[ "$output" == *"Starting"* ]]
+    [[ "$output" == *"Completed"* ]]
+    [[ "$output" != *"Processing:"* ]]
+    [[ "$output" != *"Linked to:"* ]]
+}
+
+@test "--maxdepth limits recursion" {
+    mkdir -p "$INPUT/a/b/c/d"
+    python3 -c "
+import sys; sys.path.insert(0, '$BATS_TEST_DIRNAME')
+from generate_test_data import make_jpeg, make_png
+make_jpeg('$INPUT/level0.jpg')
+make_png('$INPUT/a/level1.png')
+make_jpeg('$INPUT/a/b/level2.jpg')
+"
+    run "$SCRIPT" --maxdepth 2 "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    # maxdepth 2 = root (depth 1) + one subdir (depth 2)
+    # Should find level0.jpg and a/level1.png, not a/b/level2.jpg
+    [[ "$output" == *"Processed: 2"* ]]
+}
+
+@test "--maxdepth=2 syntax (equals form)" {
+    mkdir -p "$INPUT/a/b"
+    python3 -c "
+import sys; sys.path.insert(0, '$BATS_TEST_DIRNAME')
+from generate_test_data import make_jpeg, make_png
+make_jpeg('$INPUT/shallow.jpg')
+make_png('$INPUT/a/deep.png')
+make_jpeg('$INPUT/a/b/deeper.jpg')
+"
+    run "$SCRIPT" --maxdepth=2 "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Processed: 2"* ]]
+}
+
+@test "version is now 2.0.0" {
+    run "$SCRIPT" --version
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"2.0.0"* ]]
+}
+
+@test "unknown option exits with error" {
+    mkdir -p "$INPUT"
+    run "$SCRIPT" --bogus "$INPUT" "$OUTPUT"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"unknown option"* ]]
+}
+
+# Issue #33: preflight hardlink check
+@test "issue #33: preflight hardlink check runs on startup" {
+    mkdir -p "$INPUT"
+    python3 -c "
+import sys; sys.path.insert(0, '$BATS_TEST_DIRNAME')
+from generate_test_data import make_jpeg
+make_jpeg('$INPUT/test.jpg')
+"
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    # The hardlink test files should not remain
+    [ ! -f "$OUTPUT/.hardlink_test_a" ]
+    [ ! -f "$OUTPUT/.hardlink_test_b" ]
+}
+
+# Issue #45: MIME lowercased
+@test "issue #45: MIME type is lowercased before case matching" {
+    mkdir -p "$INPUT"
+    python3 -c "
+import sys; sys.path.insert(0, '$BATS_TEST_DIRNAME')
+from generate_test_data import make_jpeg
+make_jpeg('$INPUT/test.jpg')
+"
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    # Verify the script lowercases MIME (grep for ,, which is bash lowercase)
+    run grep 'mime.*,,\|${file_output,,}' "$SCRIPT"
+    [ "$status" -eq 0 ]
+}
+
+# Issue #31: counters initialized before trap
+@test "issue #31: counters are initialized before trap is set" {
+    # Verify counters appear before trap in the script
+    run grep -n 'processed=0\|linked=0\|trap cleanup' "$SCRIPT"
+    [ "$status" -eq 0 ]
+    # Counters should appear before trap
+    local counter_line trap_line
+    counter_line=$(echo "$output" | grep 'processed=0' | head -1 | cut -d: -f1)
+    trap_line=$(echo "$output" | grep 'trap cleanup' | head -1 | cut -d: -f1)
+    [ "$counter_line" -lt "$trap_line" ]
 }
