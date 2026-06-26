@@ -159,13 +159,30 @@ def make_zip(path):
 
 
 def make_targz(path):
-    buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-        info = tarfile.TarInfo(name="test.txt")
-        info.size = 12
-        tar.addfile(info, io.BytesIO(b"test content"))
-    with open(path, "wb") as f:
-        f.write(buf.getvalue())
+    """Create a tar.gz file that file recognizes as a tar archive."""
+    # Use the tar command directly for proper tar format detection
+    import subprocess
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create a file to tar
+        src = os.path.join(tmpdir, "test.txt")
+        with open(src, "w") as f:
+            f.write("test content\n")
+        # Use tar command to create proper tar.gz
+        subprocess.run(
+            ["tar", "czf", path, "-C", tmpdir, "test.txt"],
+            capture_output=True, timeout=5
+        )
+    # Verify it was created
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        # Fallback: use Python tarfile
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+            info = tarfile.TarInfo(name="test.txt")
+            info.size = 12
+            tar.addfile(info, io.BytesIO(b"test content"))
+        with open(path, "wb") as f:
+            f.write(buf.getvalue())
 
 
 def make_gz(path):

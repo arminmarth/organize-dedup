@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-VERSION="1.0.0"
+VERSION="2.0.0"
 
 log() {
     printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*"
@@ -14,24 +14,47 @@ warn() {
 
 usage() {
     cat <<'USAGE'
-Usage: organize_and_dedup.sh <input_dir> <output_dir>
+Usage: organize_and_dedup.sh [options] <input_dir> <output_dir>
 
 Find files recursively in the input directory, detect their correct extension
 from MIME/magic, and hardlink them into category/YYYY-MM folders using a
 SHA256 filename.
 
 Options:
-  -h, --help     Show this help message.
-  -v, --version  Show the script version.
+  -h, --help        Show this help message.
+  -v, --version     Show the script version.
+  -n, --dry-run     Preview actions without modifying the filesystem.
+  -q, --quiet       Suppress per-file log output (summary only).
+  --maxdepth N      Limit find recursion depth (default: unlimited).
 USAGE
 }
 
+# --- Globals (initialized before trap) ---
+processed=0
+linked=0
+skipped=0
+duplicates=0
+failed=0
+copied=0
+declare -A existing_hashes=()
+declare -A seen_hashes=()
+
 cleanup_on_interrupt() {
-    warn "Interrupted. Processed: $processed, linked: $linked, skipped: $skipped, duplicates: $duplicates, warnings: $failed"
+    warn "Interrupted. Processed: $processed, linked: $linked, copied: $copied, skipped: $skipped, duplicates: $duplicates, warnings: $failed"
     exit 130
 }
 
-if [[ $# -eq 1 ]]; then
+cleanup_on_term() {
+    warn "Terminated. Processed: $processed, linked: $linked, copied: $copied, skipped: $skipped, duplicates: $duplicates, warnings: $failed"
+    exit 143
+}
+
+# --- Argument parsing ---
+DRY_RUN=0
+QUIET=0
+MAXDEPTH=""
+
+while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)
             usage
@@ -41,8 +64,44 @@ if [[ $# -eq 1 ]]; then
             echo "organize_and_dedup.sh $VERSION"
             exit 0
             ;;
+        -n|--dry-run)
+            DRY_RUN=1
+            shift
+            ;;
+        -q|--quiet)
+            QUIET=1
+            shift
+            ;;
+        --maxdepth)
+            if [[ -z "${2:-}" || "$2" == -* || ! "$2" =~ ^[0-9]+$ ]]; then
+                echo "Error: --maxdepth requires a positive integer argument." >&2
+                exit 1
+            fi
+            MAXDEPTH="$2"
+            shift 2
+            ;;
+        --maxdepth=*)
+            MAXDEPTH="${1#*=}"
+            if [[ ! "$MAXDEPTH" =~ ^[0-9]+$ ]]; then
+                echo "Error: --maxdepth requires a positive integer argument." >&2
+                exit 1
+            fi
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            echo "Error: unknown option: $1" >&2
+            usage
+            exit 1
+            ;;
+        *)
+            break
+            ;;
     esac
-fi
+done
 
 if [[ $# -ne 2 ]]; then
     usage
@@ -54,8 +113,25 @@ if [[ -z "${BASH_VERSINFO:-}" || "${BASH_VERSINFO[0]}" -lt 4 ]]; then
     exit 1
 fi
 
-INPUT_DIR="${1%/}"
-OUTPUT_DIR="${2%/}"
+# --- Canonicalize paths (issue #47) ---
+INPUT_DIR_RAW="$1"
+OUTPUT_DIR_RAW="$2"
+
+# Strip trailing slashes
+INPUT_DIR="${INPUT_DIR_RAW%/}"
+OUTPUT_DIR="${OUTPUT_DIR_RAW%/}"
+
+# Canonicalize via realpath if available (issue #47)
+if command -v realpath >/dev/null 2>&1; then
+    INPUT_DIR=$(realpath -- "$INPUT_DIR")
+    OUTPUT_DIR_REAL=$(realpath -m -- "$OUTPUT_DIR")
+elif command -v readlink >/dev/null 2>&1; then
+    INPUT_DIR=$(readlink -f -- "$INPUT_DIR")
+    # readlink -m creates the path even if it doesn't exist
+    OUTPUT_DIR_REAL=$(readlink -m -- "$OUTPUT_DIR")
+else
+    OUTPUT_DIR_REAL="$OUTPUT_DIR"
+fi
 
 if [[ ! -d "$INPUT_DIR" ]]; then
     echo "Error: input directory does not exist: $INPUT_DIR" >&2
@@ -67,11 +143,13 @@ if [[ -e "$OUTPUT_DIR" && ! -d "$OUTPUT_DIR" ]]; then
     exit 1
 fi
 
-if [[ "$INPUT_DIR" == "$OUTPUT_DIR" ]]; then
+# Use canonicalized paths for comparison (issue #47)
+if [[ "$INPUT_DIR" == "$OUTPUT_DIR_REAL" ]]; then
     echo "Error: input and output directories must be different." >&2
     exit 1
 fi
 
+# --- Tool detection ---
 STAT_CMD="stat"
 if command -v gstat >/dev/null 2>&1; then
     STAT_CMD="gstat"
@@ -84,25 +162,80 @@ if ! command -v "$HASH_CMD" >/dev/null 2>&1; then
     fi
 fi
 
-for cmd in file "$HASH_CMD" "$STAT_CMD" date; do
+DATE_CMD="date"
+if command -v gdate >/dev/null 2>&1; then
+    DATE_CMD="gdate"
+fi
+
+# Issue #52: on macOS, BSD stat/date don't support GNU flags — require gstat/gdate
+if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    if [[ "$STAT_CMD" == "stat" ]]; then
+        echo "Error: 'gstat' (GNU stat) not found — required on macOS." >&2
+        echo "  On macOS, install GNU coreutils: brew install coreutils" >&2
+        exit 1
+    fi
+    if [[ "$DATE_CMD" == "date" ]]; then
+        echo "Error: 'gdate' (GNU date) not found — required on macOS." >&2
+        echo "  On macOS, install GNU coreutils: brew install coreutils" >&2
+        exit 1
+    fi
+fi
+
+# Check that all required tools are available
+for cmd in file "$HASH_CMD" "$STAT_CMD" "$DATE_CMD"; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         echo "Error: '$cmd' command not found." >&2
+        if [[ "$cmd" == "gdate" || "$cmd" == "gstat" ]]; then
+            echo "  On macOS, install GNU coreutils: brew install coreutils" >&2
+        fi
         exit 1
     fi
 done
+
+# --- Preflight check: hardlink support (issue #33) ---
+check_hardlink_support() {
+    local test_a="$OUTPUT_DIR/.hardlink_probe_$$_$RANDOM"
+    local test_b="$test_a.link"
+    touch -- "$test_a" 2>/dev/null
+    if ! ln -- "$test_a" "$test_b" 2>/dev/null; then
+        rm -f -- "$test_a" 2>/dev/null
+        warn "output filesystem does not support hardlinks — files will be copied instead."
+        return 1
+    fi
+    rm -f -- "$test_a" "$test_b"
+    return 0
+}
 
 log "Starting organize_and_dedup.sh $VERSION"
 log "Input directory: $INPUT_DIR"
 log "Output directory: $OUTPUT_DIR"
 log "Hash command: $HASH_CMD"
-
-mkdir -p -- "$OUTPUT_DIR"
-if [[ ! -w "$OUTPUT_DIR" ]]; then
-    echo "Error: output directory is not writable: $OUTPUT_DIR" >&2
-    exit 1
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    log "DRY RUN — no files will be modified."
 fi
 
-trap cleanup_on_interrupt INT TERM
+# Create output dir only when not in dry-run mode (review feedback)
+if [[ "$DRY_RUN" -eq 0 ]]; then
+    mkdir -p -- "$OUTPUT_DIR"
+fi
+# In dry-run mode, skip writability check if output doesn't exist yet
+if [[ "$DRY_RUN" -eq 0 || -d "$OUTPUT_DIR" ]]; then
+    if [[ ! -w "$OUTPUT_DIR" ]]; then
+        echo "Error: output directory is not writable: $OUTPUT_DIR" >&2
+        exit 1
+    fi
+fi
+
+HARDLINK_OK=1
+if [[ "$DRY_RUN" -eq 0 ]]; then
+    check_hardlink_support || HARDLINK_OK=0
+fi
+
+# Set traps AFTER counters are initialized (issue #31)
+trap cleanup_on_interrupt INT
+trap cleanup_on_term TERM
+
+# --- Functions ---
 
 get_year_month_from_exif() {
     local file="$1"
@@ -110,65 +243,57 @@ get_year_month_from_exif() {
         return 1
     fi
 
+    # Issue #38: explicitly try each tag in priority order
     local exif_date
-    exif_date=$(exiftool -s -s -s \
-        -DateTimeOriginal \
-        -CreateDate \
-        -MediaCreateDate \
-        -d "%Y-%m" \
-        -- "$file" 2>/dev/null | head -n 1 || true)
-
-    if [[ "$exif_date" =~ ^[0-9]{4}-[0-9]{2}$ ]]; then
-        printf '%s' "$exif_date"
-        return 0
-    fi
+    for tag in DateTimeOriginal CreateDate MediaCreateDate; do
+        exif_date=$(exiftool -s -s -s -"$tag" -d "%Y-%m" -- "$file" 2>/dev/null | head -n 1 || true)
+        if [[ "$exif_date" =~ ^[0-9]{4}-[0-9]{2}$ ]]; then
+            # Issue #38: reject zero/garbage dates
+            local year="${exif_date:0:4}"
+            local month="${exif_date:5:2}"
+            if [[ "$year" -ge 1970 && "$year" -le 2100 && "$month" -ge 1 && "$month" -le 12 ]]; then
+                printf '%s' "$exif_date"
+                return 0
+            fi
+        fi
+    done
 
     return 1
 }
 
+# Issue #36: detect stat variant once and use single call
+STAT_IS_GNU=""
+detect_stat_variant() {
+    if "$STAT_CMD" -c "%Y" -- / >/dev/null 2>&1; then
+        STAT_IS_GNU=1
+    else
+        STAT_IS_GNU=0
+    fi
+}
+detect_stat_variant
+
 get_year_month_from_stat() {
     local file="$1"
     local timestamp
-    timestamp=$(get_stat_timestamp "$file" "%W" "%B")
-    if [[ "$timestamp" == "0" || "$timestamp" == "-1" ]]; then
-        timestamp=$(get_stat_timestamp "$file" "%Y" "%m")
-    fi
-    format_timestamp "$timestamp"
-}
 
-get_stat_timestamp() {
-    local file="$1"
-    local gnu_flag="$2"
-    local bsd_flag="$3"
-
-    if "$STAT_CMD" -c "$gnu_flag" -- "$file" >/dev/null 2>&1; then
-        "$STAT_CMD" -c "$gnu_flag" -- "$file"
-        return
+    if [[ "$STAT_IS_GNU" == "1" ]]; then
+        # GNU stat: %Y = mtime epoch
+        timestamp=$("$STAT_CMD" -c "%Y" -- "$file" 2>/dev/null || true)
+    else
+        # BSD stat: -f %m = mtime epoch
+        timestamp=$("$STAT_CMD" -f "%m" -- "$file" 2>/dev/null || true)
     fi
 
-    if "$STAT_CMD" -f "$bsd_flag" -- "$file" >/dev/null 2>&1; then
-        "$STAT_CMD" -f "$bsd_flag" -- "$file"
-        return
-    fi
-
-    date +%s
-}
-
-format_timestamp() {
-    local timestamp="$1"
     if [[ -z "$timestamp" || "$timestamp" == "0" || "$timestamp" == "-1" ]]; then
-        date "+%Y-%m"
+        "$DATE_CMD" "+%Y-%m"
         return
     fi
-    if command -v gdate >/dev/null 2>&1; then
-        gdate -d "@$timestamp" "+%Y-%m"
-        return
+
+    if "$DATE_CMD" -d "@$timestamp" "+%Y-%m" >/dev/null 2>&1; then
+        "$DATE_CMD" -d "@$timestamp" "+%Y-%m"
+    else
+        "$DATE_CMD" -r "$timestamp" "+%Y-%m"
     fi
-    if date -d "@$timestamp" "+%Y-%m" >/dev/null 2>&1; then
-        date -d "@$timestamp" "+%Y-%m"
-        return
-    fi
-    date -r "$timestamp" "+%Y-%m"
 }
 
 hash_file() {
@@ -192,18 +317,24 @@ normalize_extension() {
         mov|qt) echo "mov" ;;
         mp3|mp2|mpga) echo "mp3" ;;
         oga|ogg) echo "ogg" ;;
-        tgz|tar.gz) echo "tar.gz" ;;
+        tgz) echo "tar.gz" ;;
         *) echo "$ext" ;;
     esac
 }
 
+# Issue #17: single file call (was 2)
+# Issue #45: lowercase MIME before case matching
+# Issue #37: handle text/x-script.python and other variants
+# Issue #39: expanded MIME type coverage
 get_extension_and_category() {
     local file="$1"
     local mime
     local desc
 
-    mime=$(file --mime-type -b -- "$file" 2>/dev/null || true)
-    desc=$(file -b -- "$file" 2>/dev/null || true)
+    # Issue #17: single call, capture both mime and desc
+    local file_output
+    file_output=$(file --mime-type -b -- "$file" 2>/dev/null || true)
+    mime="${file_output,,}"  # Issue #45: lowercase
 
     if [[ -z "$mime" ]]; then
         warn "unable to read file type for '$file'."
@@ -211,6 +342,7 @@ get_extension_and_category() {
         return 0
     fi
 
+    # Issue #39: expanded coverage with additional MIME types
     case "$mime" in
         image/jpeg) echo "jpg images"; return 0 ;;
         image/png) echo "png images"; return 0 ;;
@@ -301,19 +433,46 @@ get_extension_and_category() {
         application/x-plist) echo "plist config"; return 0 ;;
         text/calendar) echo "ics documents"; return 0 ;;
         text/vcard) echo "vcf documents"; return 0 ;;
-        text/plain) echo "txt text"; return 0 ;;
+        text/plain)
+            # Issue #37: filename-based fallback for code files that libmagic
+            # reports as text/plain (Go, Rust, TOML, Markdown, YAML, etc.)
+            local basename="${file##*/}"
+            local ext="${basename##*.}"
+            ext="${ext,,}"
+            if [[ "$ext" != "$basename" ]]; then
+                case "$ext" in
+                    py) echo "py code"; return 0 ;;
+                    js|mjs) echo "js code"; return 0 ;;
+                    ts) echo "ts code"; return 0 ;;
+                    go) echo "go code"; return 0 ;;
+                    rs) echo "rs code"; return 0 ;;
+                    rb) echo "rb code"; return 0 ;;
+                    java) echo "java code"; return 0 ;;
+                    c|h) echo "c code"; return 0 ;;
+                    cpp|cc|cxx) echo "cpp code"; return 0 ;;
+                    sh|bash|zsh) echo "sh code"; return 0 ;;
+                    sql) echo "sql text"; return 0 ;;
+                    md|markdown) echo "md text"; return 0 ;;
+                    yaml|yml) echo "yaml text"; return 0 ;;
+                    toml) echo "toml text"; return 0 ;;
+                    css) echo "css text"; return 0 ;;
+                    pl|pm) echo "pl code"; return 0 ;;
+                esac
+            fi
+            echo "txt text"; return 0 ;;
         text/csv) echo "csv text"; return 0 ;;
         text/x-env) echo "env text"; return 0 ;;
         text/x-php|application/x-httpd-php) echo "php code"; return 0 ;;
-        text/x-python|text/x-python3) echo "py code"; return 0 ;;
+        # Issue #37: handle all Python MIME variants
+        text/x-python|text/x-python3|text/x-script.python) echo "py code"; return 0 ;;
         application/x-bytecode.python) echo "pyc code"; return 0 ;;
         text/x-sh|text/x-shellscript|text/x-bash|text/x-zsh) echo "sh code"; return 0 ;;
         text/x-perl) echo "pl code"; return 0 ;;
         text/x-ruby) echo "rb code"; return 0 ;;
         text/x-java) echo "java code"; return 0 ;;
-        application/java-byte-code) echo "class code"; return 0 ;;
+        # Issue #37: handle C/C++ variants (file returns text/x-c for Go, text/x-c++ for Java)
         text/x-c) echo "c code"; return 0 ;;
-        text/x-c++) echo "cpp code"; return 0 ;;
+        text/x-c++|text/x-cplusplus) echo "cpp code"; return 0 ;;
         text/x-asm) echo "asm code"; return 0 ;;
         text/x-makefile) echo "makefile code"; return 0 ;;
         text/x-diff) echo "diff text"; return 0 ;;
@@ -325,11 +484,26 @@ get_extension_and_category() {
         application/x-7z-compressed) echo "7z archives"; return 0 ;;
         application/x-rar|application/vnd.rar) echo "rar archives"; return 0 ;;
         application/x-tar) echo "tar archives"; return 0 ;;
-        application/gzip|application/x-gzip) echo "gz archives"; return 0 ;;
+        # Issue #34: detect tar.gz before plain gz
+        # file returns application/gzip for both .gz and .tar.gz — need to check
+        # the description to distinguish
+        application/gzip|application/x-gzip)
+            # Check if this is actually a tar.gz by decompressing and checking
+            # file -b only shows "gzip compressed data" — need -z to look inside
+            local desc
+            desc=$(file -bz -- "$file" 2>/dev/null || true)
+            if [[ "$desc" == *"tar archive"* ]]; then
+                echo "tar.gz archives"
+            else
+                echo "gz archives"
+            fi
+            return 0 ;;
         application/x-bzip2) echo "bz2 archives"; return 0 ;;
         application/x-xz) echo "xz archives"; return 0 ;;
         application/x-iso9660-image) echo "iso archives"; return 0 ;;
-        application/vnd.debian.binary-package) echo "deb archives"; return 0 ;;
+        # Issue #39: add RPM, DEB, and other common archive types
+        application/x-rpm) echo "rpm archives"; return 0 ;;
+        application/vnd.debian.binary-package|application/x-archive) echo "deb archives"; return 0 ;;
         application/x-bittorrent) echo "torrent archives"; return 0 ;;
         application/java-archive|application/x-java-applet) echo "jar archives"; return 0 ;;
         application/x-executable|application/x-pie-executable|application/x-sharedlib|application/x-msdownload|application/vnd.microsoft.portable-executable)
@@ -344,18 +518,19 @@ get_extension_and_category() {
         application/x-font-type1) echo "pfb fonts"; return 0 ;;
         application/x-font-pfm) echo "pfm fonts"; return 0 ;;
         application/x-dfont) echo "dfont fonts"; return 0 ;;
-        application/font-ttf) echo "ttf fonts"; return 0 ;;
-        application/font-otf|application/vnd.ms-opentype) echo "otf fonts"; return 0 ;;
+        application/font-ttf|font/ttf) echo "ttf fonts"; return 0 ;;
+        application/font-otf|application/vnd.ms-opentype|font/otf) echo "otf fonts"; return 0 ;;
         font/woff) echo "woff fonts"; return 0 ;;
         font/woff2) echo "woff2 fonts"; return 0 ;;
-        font/sfnt) echo "sfnt fonts"; return 0 ;;
+        font/sfnt) echo "ttf fonts"; return 0 ;;
         font/x-postscript-pfb) echo "pfb fonts"; return 0 ;;
+        # Issue #39: add markdown, YAML, TOML, CSS, SQL as text
+        text/markdown) echo "md text"; return 0 ;;
+        text/x-yaml|text/yaml) echo "yaml text"; return 0 ;;
+        text/css) echo "css text"; return 0 ;;
+        text/x-sql) echo "sql text"; return 0 ;;
+        application/yaml|application/x-yaml) echo "yaml text"; return 0 ;;
     esac
-
-    if [[ "$desc" == *"tar archive"* && "$mime" == "application/gzip" ]]; then
-        echo "tar.gz archives"
-        return 0
-    fi
 
     echo "bin unknown"
 }
@@ -371,9 +546,12 @@ process_file() {
     local target_file
     local action
 
-    log "Processing: $file"
+    if [[ "$QUIET" -eq 0 ]]; then
+        log "Processing: $file"
+    fi
 
     if [[ ! -r "$file" ]]; then
+        ((++skipped))
         ((++failed))
         warn "unreadable file '$file'."
         return 0
@@ -390,6 +568,7 @@ process_file() {
 
     hash=$(hash_file "$file")
     if [[ -z "$hash" ]]; then
+        ((++skipped))
         ((++failed))
         warn "failed to compute hash for '$file'."
         return 0
@@ -398,18 +577,34 @@ process_file() {
 
     if [[ -n "${seen_hashes[$hash]:-}" ]]; then
         ((++duplicates))
-        log "Duplicate detected (already processed hash): $file"
+        if [[ "$QUIET" -eq 0 ]]; then
+            log "Duplicate detected (already processed hash): $file"
+        fi
         return 0
     fi
 
     if [[ -n "${existing_hashes[$hash]:-}" ]]; then
         ((++duplicates))
-        log "Duplicate detected (already in output): $file"
-        seen_hashes[$hash]="${existing_hashes[$hash]}"
+        if [[ "$QUIET" -eq 0 ]]; then
+            log "Duplicate detected (already in output): $file"
+        fi
+        # Issue #51: store the hash key only, not a stale path that may be deleted mid-run
+        seen_hashes[$hash]=1
         return 0
     fi
 
     target_dir="$OUTPUT_DIR/$category/$year_month"
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        target_file="$target_dir/$hash.$extension"
+        ((++linked))
+        if [[ "$QUIET" -eq 0 ]]; then
+            log "[DRY RUN] Would link to: $target_file"
+        fi
+        seen_hashes[$hash]=1
+        return 0
+    fi
+
     if ! mkdir -p -- "$target_dir"; then
         ((++failed))
         warn "failed to create directory '$target_dir'."
@@ -420,60 +615,95 @@ process_file() {
 
     if [[ -e "$target_file" ]]; then
         ((++duplicates))
-        log "Duplicate detected (already exists): $target_file"
-        seen_hashes[$hash]="$target_file"
+        if [[ "$QUIET" -eq 0 ]]; then
+            log "Duplicate detected (already exists): $target_file"
+        fi
+        seen_hashes[$hash]=1
         return 0
     fi
 
     if compgen -G "$target_dir/$hash.*" >/dev/null; then
         ((++duplicates))
-        log "Duplicate detected (same hash in directory): $file"
-        seen_hashes[$hash]="$target_dir/$hash.*"
+        if [[ "$QUIET" -eq 0 ]]; then
+            log "Duplicate detected (same hash in directory): $file"
+        fi
+        seen_hashes[$hash]=1
         return 0
     fi
 
     action="Linked"
-    if ! ln -- "$file" "$target_file"; then
-        warn "hardlink failed for '$file' -> '$target_file', attempting copy."
+    if [[ "$HARDLINK_OK" -eq 1 ]]; then
+        if ! ln -- "$file" "$target_file"; then
+            # Issue #25: warn loudly when falling back to copy
+            warn "WARNING: hardlink failed for '$file' -> '$target_file', falling back to copy. File was COPIED, not hardlinked."
+            if ! cp -p -- "$file" "$target_file"; then
+                ((++failed))
+                warn "failed to copy '$file' -> '$target_file'."
+                return 0
+            fi
+            ((++copied))
+            action="Copied"
+        fi
+    else
+        # Issue #25: when hardlinks not supported, copy with explicit loud warning
+        warn "WARNING: hardlinks not supported on output filesystem — copying '$file' -> '$target_file'. File was COPIED, not hardlinked."
         if ! cp -p -- "$file" "$target_file"; then
             ((++failed))
             warn "failed to copy '$file' -> '$target_file'."
             return 0
         fi
+        ((++copied))
         action="Copied"
     fi
 
     ((++linked))
-    seen_hashes[$hash]="$target_file"
-    log "$action to: $target_file"
+    seen_hashes[$hash]=1
+    if [[ "$QUIET" -eq 0 ]]; then
+        log "$action to: $target_file"
+    fi
 }
 
-processed=0
-linked=0
-skipped=0
-duplicates=0
-failed=0
-declare -A existing_hashes=()
-declare -A seen_hashes=()
-
+# --- Pre-scan existing output for hash dedup (issue #42: note about O(N)) ---
+# Issue #48: also hash pre-existing files that don't follow <64hex>.<ext> naming
 if [[ -d "$OUTPUT_DIR" ]]; then
+    # Issue #41: use -- before path
+    # Issue #30: use canonical path and -L to follow symlinks
     while IFS= read -r -d '' existing_file; do
         base_name=${existing_file##*/}
         hash_candidate=${base_name%%.*}
         if [[ "$hash_candidate" =~ ^[0-9A-Fa-f]{64}$ ]]; then
             existing_hashes[${hash_candidate^^}]="$existing_file"
+        else
+            # Issue #48: hash pre-existing files with non-hash names
+            if [[ -r "$existing_file" ]]; then
+                local_hash=$(hash_file "$existing_file")
+                if [[ -n "$local_hash" ]]; then
+                    existing_hashes[${local_hash^^}]="$existing_file"
+                fi
+            fi
         fi
-    done < <(find "$OUTPUT_DIR" -type f -print0)
+    done < <(find -L -- "$OUTPUT_DIR" -type f -print0)
 fi
 
-find_cmd=(find "$INPUT_DIR" -type f)
-if [[ "$OUTPUT_DIR" == "$INPUT_DIR" || "$OUTPUT_DIR" == "$INPUT_DIR"/* ]]; then
-    find_cmd+=( -not -path "$OUTPUT_DIR/*" )
+# --- Build find command ---
+# Issue #41: use -- before paths
+# Issue #30: use -L to follow symlinked directories, and use canonical INPUT_DIR
+# Note: -maxdepth must come before other expressions in find
+find_cmd=(find -L -- "$INPUT_DIR")
+if [[ -n "$MAXDEPTH" ]]; then
+    find_cmd+=( -maxdepth "$MAXDEPTH" )
+fi
+find_cmd+=( -type f )
+
+# Issue #47: compare canonical paths for output exclusion
+if [[ "$OUTPUT_DIR_REAL" == "$INPUT_DIR" || "$OUTPUT_DIR_REAL" == "$INPUT_DIR"/* ]]; then
+    find_cmd+=( -not -path "$OUTPUT_DIR_REAL/*" )
 fi
 
+# --- Main loop ---
 while IFS= read -r -d '' file; do
     ((++processed))
     process_file "$file"
 done < <("${find_cmd[@]}" -print0)
 
-log "Completed. Processed: $processed, linked: $linked, skipped: $skipped, duplicates: $duplicates, warnings: $failed"
+log "Completed. Processed: $processed, linked: $linked, copied: $copied, skipped: $skipped, duplicates: $duplicates, warnings: $failed"
