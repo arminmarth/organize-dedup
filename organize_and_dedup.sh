@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-VERSION="2.0.0"
+VERSION="0.9.0"
 
 log() {
     printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*"

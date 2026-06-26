@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0] — 2026-06-26
+## [0.9.0] — 2026-06-26
 
 ### Summary
 
@@ -48,7 +48,7 @@ always zero or the absence of the `copied` counter in the summary output.
 
 ### Changed
 
-- Version bumped to 2.0.0
+- Version bumped to 0.9.0
 - Usage line updated to show options: `Usage: organize_and_dedup.sh [options] <input_dir> <output_dir>`
 - Summary output now includes `copied: N` count
 - Interrupt/terminate messages now include `copied: $copied`

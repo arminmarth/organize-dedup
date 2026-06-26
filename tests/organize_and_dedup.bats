@@ -932,10 +932,10 @@ make_jpeg('$INPUT/a/b/deeper.jpg')
     [[ "$output" == *"Processed: 2"* ]]
 }
 
-@test "version is now 2.0.0" {
+@test "version is now 0.9.0" {
     run "$SCRIPT" --version
     [ "$status" -eq 0 ]
-    [[ "$output" == *"2.0.0"* ]]
+    [[ "$output" == *"0.9.0"* ]]
 }
 
 @test "unknown option exits with error" {
