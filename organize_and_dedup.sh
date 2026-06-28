@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-VERSION="0.9.0"
+VERSION="0.9.1"
 
 log() {
     printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*"
@@ -379,6 +379,12 @@ get_extension_and_category() {
         image/bpg) echo "bpg images"; return 0 ;;
         image/fits) echo "fits images"; return 0 ;;
         image/heic|image/heif) echo "heic images"; return 0 ;;
+        image/jxl) echo "jxl images"; return 0 ;;
+        image/vnd.zbrush.pcx|image/x-pcx) echo "pcx images"; return 0 ;;
+        image/wmf|image/x-wmf) echo "wmf images"; return 0 ;;
+        image/x-ms-emf|image/emf) echo "emf images"; return 0 ;;
+        application/postscript) echo "ps documents"; return 0 ;;
+        application/vnd.adobe.photoshop) echo "psd images"; return 0 ;;
         video/mp4) echo "mp4 videos"; return 0 ;;
         video/x-m4v) echo "m4v videos"; return 0 ;;
         video/x-ms-asf) echo "asf videos"; return 0 ;;
@@ -394,6 +400,10 @@ get_extension_and_category() {
         video/x-red-r3d) echo "r3d videos"; return 0 ;;
         video/x-ms-wtv) echo "wtv videos"; return 0 ;;
         application/vnd.rn-realmedia) echo "rm videos"; return 0 ;;
+        video/MP2T|video/mp2t) echo "ts videos"; return 0 ;;
+        video/x-ms-wmv) echo "wmv videos"; return 0 ;;
+        application/x-shockwave-flash) echo "swf videos"; return 0 ;;
+        application/mxf) echo "mxf videos"; return 0 ;;
         audio/mpeg) echo "mp3 audio"; return 0 ;;
         audio/x-wav|audio/wav) echo "wav audio"; return 0 ;;
         audio/flac) echo "flac audio"; return 0 ;;
@@ -406,6 +416,10 @@ get_extension_and_category() {
         audio/x-monkeys-audio|audio/x-ape) echo "ape audio"; return 0 ;;
         audio/audible) echo "aa audio"; return 0 ;;
         audio/midi) echo "mid audio"; return 0 ;;
+        audio/AMR|audio/amr) echo "amr audio"; return 0 ;;
+        audio/x-ms-wma) echo "wma audio"; return 0 ;;
+        audio/vnd.dolby.dd-raw) echo "ac3 audio"; return 0 ;;
+        audio/x-mpegurl) echo "m3u playlists"; return 0 ;;
         application/pdf) echo "pdf documents"; return 0 ;;
         application/msword) echo "doc documents"; return 0 ;;
         application/vnd.openxmlformats-officedocument.wordprocessingml.document)
@@ -428,7 +442,23 @@ get_extension_and_category() {
         application/epub+zip) echo "epub documents"; return 0 ;;
         application/x-mobipocket-ebook) echo "mobi documents"; return 0 ;;
         application/vnd.ms-htmlhelp|application/x-chm) echo "chm documents"; return 0 ;;
-        application/vnd.adobe.photoshop) echo "psd images"; return 0 ;;
+        # Codex review: don't default all OLE containers to .doc — disambiguate
+        application/x-ole-storage|application/vnd.ms-office)
+            local ole_desc
+            ole_desc=$(file -b -- "$file" 2>/dev/null || true)
+            case "$ole_desc" in
+                *MSI*Installer*) echo "msi archives"; return 0 ;;
+                *Outlook*) echo "msg email"; return 0 ;;
+                *Excel*) echo "xls documents"; return 0 ;;
+                *PowerPoint*) echo "ppt documents"; return 0 ;;
+                *Visio*) echo "vsdx documents"; return 0 ;;
+                *) echo "doc documents"; return 0 ;;
+            esac ;;
+        application/vnd.ms-outlook) echo "msg email"; return 0 ;;
+        application/mbox) echo "mbox email"; return 0 ;;
+        message/rfc822) echo "eml email"; return 0 ;;
+        application/vnd.visio.drawing.main+xml|application/vnd.ms-visio.drawing.main+xml) echo "vsdx documents"; return 0 ;;
+        application/vnd.sketchup.skp) echo "skp documents"; return 0 ;;
         application/x-indesign) echo "indd documents"; return 0 ;;
         application/x-plist) echo "plist config"; return 0 ;;
         text/calendar) echo "ics documents"; return 0 ;;
@@ -457,6 +487,13 @@ get_extension_and_category() {
                     toml) echo "toml text"; return 0 ;;
                     css) echo "css text"; return 0 ;;
                     pl|pm) echo "pl code"; return 0 ;;
+                    bat|cmd) echo "bat code"; return 0 ;;
+                    ps1) echo "ps1 code"; return 0 ;;
+                    log) echo "log text"; return 0 ;;
+                    ini|conf|cfg|properties) echo "ini text"; return 0 ;;
+                    tex) echo "tex text"; return 0 ;;
+                    srt) echo "srt subtitles"; return 0 ;;
+                    vtt) echo "vtt subtitles"; return 0 ;;
                 esac
             fi
             echo "txt text"; return 0 ;;
@@ -477,9 +514,16 @@ get_extension_and_category() {
         text/x-makefile) echo "makefile code"; return 0 ;;
         text/x-diff) echo "diff text"; return 0 ;;
         text/troff|text/x-tex) echo "txt text"; return 0 ;;
-        application/json|text/json) echo "json text"; return 0 ;;
-        text/xml|application/xml) echo "xml text"; return 0 ;;
+        application/json|text/json|application/x-ndjson) echo "json text"; return 0 ;;
+        text/xml|application/xml|application/xhtml+xml) echo "xml text"; return 0 ;;
         text/html) echo "html text"; return 0 ;;
+        application/javascript|text/javascript) echo "js code"; return 0 ;;
+        application/x-gettext-translation) echo "po text"; return 0 ;;
+        text/x-po) echo "po text"; return 0 ;;
+        text/x-msdos-batch) echo "bat code"; return 0 ;;
+        text/vtt) echo "vtt subtitles"; return 0 ;;
+        application/x-subrip) echo "srt subtitles"; return 0 ;;
+        text/x-m4) echo "m4 text"; return 0 ;;
         application/zip) echo "zip archives"; return 0 ;;
         application/x-7z-compressed) echo "7z archives"; return 0 ;;
         application/x-rar|application/vnd.rar) echo "rar archives"; return 0 ;;
@@ -504,17 +548,39 @@ get_extension_and_category() {
         # Issue #39: add RPM, DEB, and other common archive types
         application/x-rpm) echo "rpm archives"; return 0 ;;
         application/vnd.debian.binary-package|application/x-archive) echo "deb archives"; return 0 ;;
+        application/vnd.ms-msi|application/x-msi) echo "msi archives"; return 0 ;;
+        application/vnd.android.package-archive) echo "apk archives"; return 0 ;;
+        application/x-lzh-compressed) echo "lha archives"; return 0 ;;
+        application/zlib) echo "zlib archives"; return 0 ;;
+        application/x-compress) echo "Z archives"; return 0 ;;
+        application/x-lzma) echo "lzma archives"; return 0 ;;
+        application/x-arc) echo "arc archives"; return 0 ;;
         application/x-bittorrent) echo "torrent archives"; return 0 ;;
         application/java-archive|application/x-java-applet) echo "jar archives"; return 0 ;;
-        application/x-executable|application/x-pie-executable|application/x-sharedlib|application/x-msdownload|application/vnd.microsoft.portable-executable)
+        application/x-executable|application/x-pie-executable|application/x-sharedlib|application/x-msdownload|application/vnd.microsoft.portable-executable|application/x-object|application/x-dosexec|application/x-mach-binary)
             echo "exe executables"; return 0 ;;
+        application/wasm) echo "wasm executables"; return 0 ;;
         application/x-ms-shortcut) echo "lnk executables"; return 0 ;;
         application/x-mswinurl) echo "url text"; return 0 ;;
         application/vnd.sqlite3) echo "sqlite databases"; return 0 ;;
-        application/vnd.iccprofile) echo "icc profiles"; return 0 ;;
-        application/dicom) echo "dcm medical"; return 0 ;;
-        application/dxf) echo "dxf cad"; return 0 ;;
+        application/x-gdbm) echo "gdbm databases"; return 0 ;;
+        application/vnd.iccprofile) echo "icc data"; return 0 ;;
+        application/dicom) echo "dcm images"; return 0 ;;
+        application/dxf|image/vnd.dxf) echo "dxf documents"; return 0 ;;
         application/vnd.tcpdump.pcap) echo "pcap data"; return 0 ;;
+        application/x-numpy-data) echo "npy data"; return 0 ;;
+        application/x-hdf5) echo "h5 data"; return 0 ;;
+        application/fits) echo "fits data"; return 0 ;;
+        application/x-cdf) echo "cdf data"; return 0 ;;
+        application/x-matlab-data) echo "mat data"; return 0 ;;
+        application/x-stargallery-thm) echo "thm data"; return 0 ;;
+        application/x-adobe-aco) echo "aco data"; return 0 ;;
+        application/x-dbt) echo "dbt data"; return 0 ;;
+        application/etl) echo "etl data"; return 0 ;;
+        application/x-ibm-rom|application/x-genesis-rom|application/x-sms-rom|application/x-nes-rom|application/x-ms-sdi|application/x-commodore-exec|application/x-commodore-basic|application/x-ms-dat|application/x-linux-kernel) echo "rom firmware"; return 0 ;;
+        application/x-qemu-disk|application/x-floppy-image-tc) echo "img firmware"; return 0 ;;
+        application/x-pem-file|application/x-putty-private-key|text/x-ssl-private-key|text/pgp|application/pgp-signature) echo "pem certs"; return 0 ;;
+        application/x-git) echo "git data"; return 0 ;;
         application/x-font-type1) echo "pfb fonts"; return 0 ;;
         application/x-font-pfm) echo "pfm fonts"; return 0 ;;
         application/x-dfont) echo "dfont fonts"; return 0 ;;
@@ -524,12 +590,61 @@ get_extension_and_category() {
         font/woff2) echo "woff2 fonts"; return 0 ;;
         font/sfnt) echo "ttf fonts"; return 0 ;;
         font/x-postscript-pfb) echo "pfb fonts"; return 0 ;;
+        application/vnd.ms-fontobject) echo "eot fonts"; return 0 ;;
+        font/x-amiga-font) echo "amiga fonts"; return 0 ;;
         # Issue #39: add markdown, YAML, TOML, CSS, SQL as text
         text/markdown) echo "md text"; return 0 ;;
         text/x-yaml|text/yaml) echo "yaml text"; return 0 ;;
         text/css) echo "css text"; return 0 ;;
         text/x-sql) echo "sql text"; return 0 ;;
         application/yaml|application/x-yaml) echo "yaml text"; return 0 ;;
+        application/x-setupscript|application/x-wine-extension-ini) echo "ini text"; return 0 ;;
+        text/x-ms-regedit) echo "reg text"; return 0 ;;
+        application/x-bplist) echo "plist config"; return 0 ;;
+        application/octet-stream)
+            # Phase 2: second-pass identification using file -b description
+            # file --mime-type reports octet-stream for many identifiable files
+            # (minified JS, Python scripts, ELF objects, DOS COM, BIOS ROMs, etc.)
+            local desc
+            desc=$(file -b -- "$file" 2>/dev/null || true)
+            case "$desc" in
+                *JavaScript*) echo "js code"; return 0 ;;
+                *Python*script*) echo "py code"; return 0 ;;
+                *Node.js*) echo "js code"; return 0 ;;
+                *ELF*) echo "exe executables"; return 0 ;;
+                *DOS\ executable*|*PE32*) echo "exe executables"; return 0 ;;
+                *Composite\ Document*MSI*) echo "msi archives"; return 0 ;;
+                *Composite\ Document*) echo "doc documents"; return 0 ;;
+                *BIOS*ROM*|*ROM\ Ext*) echo "rom firmware"; return 0 ;;
+                *Android\ package*|*Android\ binary\ XML*) echo "apk archives"; return 0 ;;
+                *PCX*) echo "pcx images"; return 0 ;;
+                *Adobe\ Photoshop*) echo "psd images"; return 0 ;;
+                *SubRip*) echo "srt subtitles"; return 0 ;;
+                *Audio\ file\ with\ ID3*) echo "mp3 audio"; return 0 ;;
+                *OpenPGP*Key*) echo "pem certs"; return 0 ;;
+                *PGP\ signature*) echo "pem certs"; return 0 ;;
+                *GNU\ gettext*|*GNU\ message\ catalog*) echo "po text"; return 0 ;;
+                *Generic\ INItialization*) echo "ini text"; return 0 ;;
+                *Windows\ setup\ INF*) echo "ini text"; return 0 ;;
+                *LHa*archive*) echo "lha archives"; return 0 ;;
+                *zlib\ compressed*) echo "zlib archives"; return 0 ;;
+                *Squashfs\ filesystem*) echo "sqsh archives"; return 0 ;;
+                *AutoCAD\ Drawing*) echo "dxf documents"; return 0 ;;
+                *TeX\ font\ metric*) echo "tfm text"; return 0 ;;
+                *SQLite*) echo "sqlite databases"; return 0 ;;
+                *DER\ Encoded*) echo "pem certs"; return 0 ;;
+                *Windows\ Enhanced\ Metafile*) echo "emf images"; return 0 ;;
+                *ISO\ Media*) echo "iso archives"; return 0 ;;
+                *Applesoft\ BASIC*) echo "bas code"; return 0 ;;
+                *current\ ar\ archive*) echo "a archives"; return 0 ;;
+                *XENIX*relocatable*) echo "exe executables"; return 0 ;;
+                *Microsoft\ ASF*) echo "asf videos"; return 0 ;;
+                *Excel*BIFF*) echo "xls documents"; return 0 ;;
+                *ESP-IDF*|*firmware*) echo "rom firmware"; return 0 ;;
+                *MSX\ ROM*|*Genesis\ ROM*|*NES\ ROM*) echo "rom firmware"; return 0 ;;
+            esac
+            # Truly unidentifiable binary data
+            echo "bin unknown"; return 0 ;;
     esac
 
     echo "bin unknown"
