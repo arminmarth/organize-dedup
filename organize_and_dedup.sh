@@ -442,7 +442,18 @@ get_extension_and_category() {
         application/epub+zip) echo "epub documents"; return 0 ;;
         application/x-mobipocket-ebook) echo "mobi documents"; return 0 ;;
         application/vnd.ms-htmlhelp|application/x-chm) echo "chm documents"; return 0 ;;
-        application/x-ole-storage|application/vnd.ms-office) echo "doc documents"; return 0 ;;
+        # Codex review: don't default all OLE containers to .doc — disambiguate
+        application/x-ole-storage|application/vnd.ms-office)
+            local ole_desc
+            ole_desc=$(file -b -- "$file" 2>/dev/null || true)
+            case "$ole_desc" in
+                *MSI*Installer*) echo "msi archives"; return 0 ;;
+                *Outlook*) echo "msg email"; return 0 ;;
+                *Excel*) echo "xls documents"; return 0 ;;
+                *PowerPoint*) echo "ppt documents"; return 0 ;;
+                *Visio*) echo "vsdx documents"; return 0 ;;
+                *) echo "doc documents"; return 0 ;;
+            esac ;;
         application/vnd.ms-outlook) echo "msg email"; return 0 ;;
         application/mbox) echo "mbox email"; return 0 ;;
         message/rfc822) echo "eml email"; return 0 ;;
@@ -568,7 +579,7 @@ get_extension_and_category() {
         application/etl) echo "etl data"; return 0 ;;
         application/x-ibm-rom|application/x-genesis-rom|application/x-sms-rom|application/x-nes-rom|application/x-ms-sdi|application/x-commodore-exec|application/x-commodore-basic|application/x-ms-dat|application/x-linux-kernel) echo "rom firmware"; return 0 ;;
         application/x-qemu-disk|application/x-floppy-image-tc) echo "img firmware"; return 0 ;;
-        application/x-pem-file|application/x-putty-private-key|text/x-ssl-private-key|text/PGP|application/pgp-signature) echo "pem certs"; return 0 ;;
+        application/x-pem-file|application/x-putty-private-key|text/x-ssl-private-key|text/pgp|application/pgp-signature) echo "pem certs"; return 0 ;;
         application/x-git) echo "git data"; return 0 ;;
         application/x-font-type1) echo "pfb fonts"; return 0 ;;
         application/x-font-pfm) echo "pfm fonts"; return 0 ;;
