@@ -249,7 +249,7 @@ Alice,30" > "$INPUT/data.csv"
 
 # --- Edge cases ---
 
-@test "empty files are processed without error" {
+@test "empty files are skipped without error (issue #35 fix)" {
     mkdir -p "$INPUT"
     touch "$INPUT/empty1.txt"
     touch "$INPUT/empty2.txt"
@@ -257,8 +257,10 @@ Alice,30" > "$INPUT/data.csv"
 
     run "$SCRIPT" "$INPUT" "$OUTPUT"
     [ "$status" -eq 0 ]
-    # All empty files have the same SHA-256, so only 1 output
-    [ "$(find "$OUTPUT" -type f | wc -l)" -eq 1 ]
+    # Issue #35: empty files all share one SHA-256; they are skipped so
+    # distinct marker files (.gitkeep etc) are not collapsed to one entry.
+    [ "$(find "$OUTPUT" -type f | wc -l)" -eq 0 ]
+    [[ "$output" == *"skipped: 3"* ]]
 }
 
 @test "files with no extension are processed" {
@@ -572,7 +574,7 @@ make_targz('$INPUT/real.tar.gz')
 }
 
 # Issue #35: all empty files dedup to one
-@test "issue #35: all empty files dedup to a single output entry" {
+@test "issue #35: empty marker files in different dirs are all skipped, not deduped" {
     mkdir -p "$INPUT/dir1" "$INPUT/dir2" "$INPUT/dir3"
     touch "$INPUT/dir1/empty.txt"
     touch "$INPUT/dir2/empty.log"
@@ -580,8 +582,10 @@ make_targz('$INPUT/real.tar.gz')
 
     run "$SCRIPT" "$INPUT" "$OUTPUT"
     [ "$status" -eq 0 ]
-    # All empty files have same SHA-256 → 1 output
-    [ "$(find "$OUTPUT" -type f | wc -l)" -eq 1 ]
+    # Issue #35 fixed: empty files are skipped entirely instead of all
+    # collapsing into a single hash-named entry.
+    [ "$(find "$OUTPUT" -type f | wc -l)" -eq 0 ]
+    [[ "$output" == *"skipped: 3"* ]]
 }
 
 # Issue #37: code files misclassified as text/plain
