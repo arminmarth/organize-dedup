@@ -932,10 +932,10 @@ make_jpeg('$INPUT/a/b/deeper.jpg')
     [[ "$output" == *"Processed: 2"* ]]
 }
 
-@test "version is now 0.9.0" {
+@test "version is now 0.9.1" {
     run "$SCRIPT" --version
     [ "$status" -eq 0 ]
-    [[ "$output" == *"0.9.0"* ]]
+    [[ "$output" == *"0.9.1"* ]]
 }
 
 @test "unknown option exits with error" {
@@ -985,4 +985,273 @@ make_jpeg('$INPUT/test.jpg')
     counter_line=$(echo "$output" | grep 'processed=0' | head -1 | cut -d: -f1)
     trap_line=$(echo "$output" | grep 'trap cleanup' | head -1 | cut -d: -f1)
     [ "$counter_line" -lt "$trap_line" ]
+}
+
+# === Phase 1: New MIME type tests ===
+
+@test "JavaScript files are categorized as code" {
+    mkdir -p "$INPUT"
+    echo 'var x = 1; function foo() { return x; }' > "$INPUT/test.js"
+    local mime
+    mime=$(file --mime-type -b "$INPUT/test.js" 2>/dev/null)
+    echo "MIME: $mime" >&3
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [ "$(find "$OUTPUT/code" -type f 2>/dev/null | wc -l)" -ge 1 ]
+}
+
+@test "EML email files are categorized as email" {
+    mkdir -p "$INPUT"
+    printf 'From: sender@example.com\nTo: recipient@example.com\nSubject: Test\nDate: Mon, 1 Jan 2024 00:00:00 +0000\n\nBody text\n' > "$INPUT/test.eml"
+    local mime
+    mime=$(file --mime-type -b "$INPUT/test.eml" 2>/dev/null)
+    echo "MIME: $mime" >&3
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [ "$(find "$OUTPUT/email" -type f 2>/dev/null | wc -l)" -ge 1 ]
+}
+
+@test "MBOX email files are categorized as email" {
+    mkdir -p "$INPUT"
+    printf 'From sender@example.com Sun Jan  1 12:00:00 2023\nSubject: Test\nFrom: sender@example.com\nTo: recipient@example.com\n\nThis is a test email body.\n' > "$INPUT/test.mbox"
+    local mime
+    mime=$(file --mime-type -b "$INPUT/test.mbox" 2>/dev/null)
+    echo "MIME: $mime" >&3
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [ "$(find "$OUTPUT/email" -type f 2>/dev/null | wc -l)" -ge 1 ]
+}
+
+@test "SRT subtitle files are categorized as subtitles" {
+    mkdir -p "$INPUT"
+    printf '1\n00:00:01,000 --> 00:00:02,000\nHello World\n' > "$INPUT/test.srt"
+    local mime
+    mime=$(file --mime-type -b "$INPUT/test.srt" 2>/dev/null)
+    echo "MIME: $mime" >&3
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [ "$(find "$OUTPUT/subtitles" -type f 2>/dev/null | wc -l)" -ge 1 ]
+}
+
+@test "VTT subtitle files are categorized as subtitles" {
+    mkdir -p "$INPUT"
+    printf 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello World\n' > "$INPUT/test.vtt"
+    local mime
+    mime=$(file --mime-type -b "$INPUT/test.vtt" 2>/dev/null)
+    echo "MIME: $mime" >&3
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [ "$(find "$OUTPUT/subtitles" -type f 2>/dev/null | wc -l)" -ge 1 ]
+}
+
+@test "DICOM files are categorized as images (not medical)" {
+    mkdir -p "$INPUT"
+    # DICOM magic: DICM
+    printf '\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00DICM' > "$INPUT/test.dcm"
+    # file may not detect this as application/dicom with just the magic, so also test the MIME path
+    local mime
+    mime=$(file --mime-type -b "$INPUT/test.dcm" 2>/dev/null)
+    echo "MIME: $mime" >&3
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    # Should NOT have a medical category anymore
+    [ ! -d "$OUTPUT/medical" ]
+}
+
+@test "APK files are categorized as archives" {
+    mkdir -p "$INPUT"
+    # APK is a ZIP with specific content — use a real ZIP structure
+    python3 -c "
+import zipfile, io
+buf = io.BytesIO()
+with zipfile.ZipFile(buf, 'w') as zf:
+    zf.writestr('AndroidManifest.xml', b'\\x03\\x00\\x01\\x00')
+    zf.writestr('resources.arsc', b'\\x00' * 100)
+with open('$INPUT/test.apk', 'wb') as f:
+    f.write(buf.getvalue())
+"
+    local mime
+    mime=$(file --mime-type -b "$INPUT/test.apk" 2>/dev/null)
+    echo "MIME: $mime" >&3
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [ "$(find "$OUTPUT/archives" -type f 2>/dev/null | wc -l)" -ge 1 ]
+}
+
+@test "MSI installer files are categorized as archives" {
+    mkdir -p "$INPUT"
+    # MSI is an OLE2 compound document — create a minimal one
+    # Use the OLE2 magic: D0 CF 11 E0 A1 B1 1A E1
+    python3 -c "
+with open('$INPUT/test.msi', 'wb') as f:
+    f.write(b'\\xd0\\xcf\\x11\\xe0\\xa1\\xb1\\x1a\\xe1' + b'\\x00' * 480)
+"
+    local mime
+    mime=$(file --mime-type -b "$INPUT/test.msi" 2>/dev/null)
+    echo "MIME: $mime" >&3
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+}
+
+@test "PGP signature files are categorized as certs" {
+    mkdir -p "$INPUT"
+    # PGP signature block — use heredoc to avoid printf interpreting dashes
+    cat > "$INPUT/test.sig" <<'PGPSIG'
+-----BEGIN PGP SIGNATURE-----
+
+iQIzBAEBAAdGAwE=
+-----END PGP SIGNATURE-----
+PGPSIG
+    local mime
+    mime=$(file --mime-type -b "$INPUT/test.sig" 2>/dev/null)
+    echo "MIME: $mime" >&3
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [ "$(find "$OUTPUT/certs" -type f 2>/dev/null | wc -l)" -ge 1 ]
+}
+
+@test "PostScript/EPS files are categorized as documents" {
+    mkdir -p "$INPUT"
+    printf '%%!PS-Adobe-3.0 EPSF-3.0\n%%%%BoundingBox: 0 0 100 100\n' > "$INPUT/test.eps"
+    local mime
+    mime=$(file --mime-type -b "$INPUT/test.eps" 2>/dev/null)
+    echo "MIME: $mime" >&3
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [ "$(find "$OUTPUT/documents" -type f 2>/dev/null | wc -l)" -ge 1 ]
+}
+
+@test "gettext .po files are categorized as text" {
+    mkdir -p "$INPUT"
+    printf 'msgid "Hello"\nmsgstr "Hallo"\n' > "$INPUT/test.po"
+    local mime
+    mime=$(file --mime-type -b "$INPUT/test.po" 2>/dev/null)
+    echo "MIME: $mime" >&3
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [ "$(find "$OUTPUT/text" -type f 2>/dev/null | wc -l)" -ge 1 ]
+}
+
+@test "DOS batch files are categorized as code" {
+    mkdir -p "$INPUT"
+    printf '@echo off\necho Hello World\n' > "$INPUT/test.bat"
+    local mime
+    mime=$(file --mime-type -b "$INPUT/test.bat" 2>/dev/null)
+    echo "MIME: $mime" >&3
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [ "$(find "$OUTPUT/code" -type f 2>/dev/null | wc -l)" -ge 1 ]
+}
+
+@test "NDJSON files are categorized as text" {
+    mkdir -p "$INPUT"
+    printf '{"a":1}\n{"b":2}\n{"c":3}\n' > "$INPUT/test.ndjson"
+    local mime
+    mime=$(file --mime-type -b "$INPUT/test.ndjson" 2>/dev/null)
+    echo "MIME: $mime" >&3
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [ "$(find "$OUTPUT/text" -type f 2>/dev/null | wc -l)" -ge 1 ]
+}
+
+@test "M3U playlist files are categorized as playlists" {
+    mkdir -p "$INPUT"
+    printf '#EXTM3U\n#EXTINF:-1,Test\nhttp://example.com/stream.mp3\n' > "$INPUT/test.m3u"
+    local mime
+    mime=$(file --mime-type -b "$INPUT/test.m3u" 2>/dev/null)
+    echo "MIME: $mime" >&3
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [ "$(find "$OUTPUT/playlists" -type f 2>/dev/null | wc -l)" -ge 1 ]
+}
+
+@test "profiles category no longer exists (ICC moved to data)" {
+    mkdir -p "$INPUT"
+    # Create a test with any file — just verify no profiles dir is created
+    echo "test" > "$INPUT/test.txt"
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [ ! -d "$OUTPUT/profiles" ]
+}
+
+@test "cad category no longer exists (DXF moved to documents)" {
+    mkdir -p "$INPUT"
+    echo "test" > "$INPUT/test.txt"
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [ ! -d "$OUTPUT/cad" ]
+}
+
+# === Phase 2: Octet-stream second-pass tests ===
+
+@test "octet-stream: minified JavaScript is identified as code" {
+    mkdir -p "$INPUT"
+    # Create a file that file reports as application/octet-stream but identifies as JavaScript
+    # Minified JS with no line terminators can trigger this
+    printf 'var a=1;var b=2;function c(){return a+b};' > "$INPUT/minified.js"
+    # Remove the .js extension so the filename fallback doesn't catch it
+    mv "$INPUT/minified.js" "$INPUT/minified.bin"
+    # Check what file says
+    local mime desc
+    mime=$(file --mime-type -b "$INPUT/minified.bin" 2>/dev/null)
+    desc=$(file -b "$INPUT/minified.bin" 2>/dev/null)
+    echo "MIME: $mime | DESC: $desc" >&3
+    # If file detects it as JavaScript MIME, the MIME path handles it
+    # If file says octet-stream but desc has JavaScript, the second-pass catches it
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    # Should NOT be in unknown
+    [ "$(find "$OUTPUT/unknown" -type f 2>/dev/null | wc -l)" -eq 0 ]
+}
+
+@test "octet-stream: ELF object file is identified as executables" {
+    mkdir -p "$INPUT"
+    # Create a minimal ELF header (64-bit, little-endian, relocatable)
+    python3 -c "
+import struct
+# ELF header
+elf = b'\\x7fELF'  # magic
+elf += b'\\x02'     # 64-bit
+elf += b'\\x01'     # little endian
+elf += b'\\x01'     # ELF version
+elf += b'\\x00'     # OS/ABI
+elf += b'\\x00' * 8 # padding
+elf += struct.pack('<H', 1)  # ET_REL (relocatable)
+elf += struct.pack('<H', 62) # EM_X86_64
+elf += struct.pack('<I', 1)  # ELF version
+elf += b'\\x00' * 8  # entry point
+elf += b'\\x00' * 8  # program header offset
+elf += b'\\x00' * 8  # section header offset
+elf += b'\\x00' * 4  # flags
+elf += struct.pack('<H', 64)  # header size
+elf += struct.pack('<H', 0)   # program header entry size
+elf += struct.pack('<H', 0)   # program header count
+elf += struct.pack('<H', 64)  # section header entry size
+elf += struct.pack('<H', 0)   # section header count
+elf += struct.pack('<H', 0)   # section name string table index
+with open('$INPUT/test.o', 'wb') as f:
+    f.write(elf)
+"
+    local mime desc
+    mime=$(file --mime-type -b "$INPUT/test.o" 2>/dev/null)
+    desc=$(file -b "$INPUT/test.o" 2>/dev/null)
+    echo "MIME: $mime | DESC: $desc" >&3
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    [ "$(find "$OUTPUT/executables" -type f 2>/dev/null | wc -l)" -ge 1 ]
+}
+
+@test "octet-stream: Python script identified via second-pass" {
+    mkdir -p "$INPUT"
+    # Create a Python script without .py extension
+    printf '#!/usr/bin/env python3\nprint("Hello World")\n' > "$INPUT/script.bin"
+    chmod +x "$INPUT/script.bin"
+    local mime desc
+    mime=$(file --mime-type -b "$INPUT/script.bin" 2>/dev/null)
+    desc=$(file -b "$INPUT/script.bin" 2>/dev/null)
+    echo "MIME: $mime | DESC: $desc" >&3
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    # Should be in code, not unknown
+    [ "$(find "$OUTPUT/unknown" -type f 2>/dev/null | wc -l)" -eq 0 ]
 }

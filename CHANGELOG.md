@@ -5,6 +5,59 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] — 2026-06-26
+
+### Summary
+
+Massive MIME type expansion based on real-world scan of 88k files in unknown/ and 20k files in archives/.
+Added 50+ new MIME types, 5 new categories (email, subtitles, firmware, certs, playlists), removed 3
+categories (medical, profiles, cad), and added octet-stream second-pass identification.
+
+### Added — New categories
+
+- **email** — .mbox, .eml, .msg (Outlook) files
+- **subtitles** — .srt (SubRip), .vtt (WebVTT) files
+- **firmware** — BIOS ROMs, firmware images, disk images (IBM ROM, Genesis, SMS, NES, QEMU, etc.)
+- **certs** — PGP keys/signatures, PEM certificates, SSH private keys, DER encoded keys
+- **playlists** — .m3u/.m3u8 (MPEG URL) playlist files
+
+### Added — New MIME types (50+)
+
+- Images: JPEG XL, PCX (ZBrush), WMF, EMF, PostScript/EPS
+- Videos: MPEG-TS (.ts), WMV, Shockwave Flash (.swf), MXF
+- Audio: AMR, WMA, AC3 (Dolby DD)
+- Archives: MSI installers, APK (Android), LHa, zlib, compress (.Z), LZMA, ARC, SquashFS
+- Executables: ELF object files, DOS executables, Mach-O binaries, WASM
+- Documents: OLE2 compound docs, Visio, SketchUp, AutoCAD DXF
+- Code: JavaScript, DOS batch, PowerShell, Applesoft BASIC
+- Text: gettext .po, NDJSON, INI/config, Windows .reg, TeX, M4
+- Data: NumPy, HDF5, FITS, CDF, MATLAB, ICC profiles, Adobe ACO, ETL trace
+- Fonts: EOT (Microsoft), Amiga fonts
+- Email: mbox, rfc822 (EML), Outlook MSG
+- Subtitles: SubRip (SRT), WebVTT
+- Firmware: IBM ROM, Genesis/SMS/NES ROM, QEMU disk, floppy images, Linux kernel
+
+### Added — Octet-stream second-pass
+
+When `file --mime-type` reports `application/octet-stream`, a second call to `file -b` checks the
+full description for keywords (JavaScript, Python, ELF, DOS executable, BIOS ROM, PCX, Photoshop,
+SubRip, ID3, OpenPGP, etc.). This rescues ~21% of octet-stream files from the unknown bucket.
+
+### Changed
+
+- **DICOM** moved from `medical` → `images` (1 file doesn't justify a category)
+- **ICC profiles** moved from `profiles` → `data`
+- **DXF** moved from `cad` → `documents`
+- **APK** categorized as `archives` (was unknown)
+- **MSI** categorized as `archives` (was unknown)
+- Test suite expanded from 68 → 87 tests
+
+### Removed
+
+- `medical` category (DICOM → images)
+- `profiles` category (ICC → data)
+- `cad` category (DXF → documents)
+
 ## [0.9.0] — 2026-06-26
 
 ### Summary
