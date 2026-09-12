@@ -251,7 +251,7 @@ get_year_month_from_exif() {
             # Issue #38: reject zero/garbage dates
             local year="${exif_date:0:4}"
             local month="${exif_date:5:2}"
-            if [[ "$year" -ge 1970 && "$year" -le 2100 && "$month" -ge 1 && "$month" -le 12 ]]; then
+            if [[ "$year" -ge 1970 && "$year" -le 2100 && "10#$month" -ge 1 && "10#$month" -le 12 ]]; then
                 printf '%s' "$exif_date"
                 return 0
             fi
