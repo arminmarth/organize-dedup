@@ -22,6 +22,8 @@ SHA256 filename.
 
 Options:
   -h, --help        Show this help message.
+  --resume          Load checkpoint from a previous interrupted run (issue #43)
+  --low-memory      Skip the output-dir pre-scan to reduce RAM usage (issue #19)
   -v, --version     Show the script version.
   -n, --dry-run     Preview actions without modifying the filesystem.
   -q, --quiet       Suppress per-file log output (summary only).
@@ -38,13 +40,32 @@ failed=0
 copied=0
 declare -A existing_hashes=()
 declare -A seen_hashes=()
+RESUME_CKPT_WRITES=0
+
+CKPT_FILE=""
+CKPT_COUNTER=0
+
+# Issue #43: flush seen_hashes to a checkpoint file for --resume
+flush_checkpoint() {
+    if [[ -z "$CKPT_FILE" || "$RESUME_CKPT_WRITES" != "1" ]]; then
+        return 0
+    fi
+    {
+        printf '#CHECKPOINT\tv1\n'
+        for h in "${!seen_hashes[@]}"; do
+            printf '%s\n' "$h"
+        done
+    } > "${CKPT_FILE}.tmp" 2>/dev/null && mv -f -- "${CKPT_FILE}.tmp" "$CKPT_FILE" 2>/dev/null || true
+}
 
 cleanup_on_interrupt() {
+    flush_checkpoint
     warn "Interrupted. Processed: $processed, linked: $linked, copied: $copied, skipped: $skipped, duplicates: $duplicates, warnings: $failed"
     exit 130
 }
 
 cleanup_on_term() {
+    flush_checkpoint
     warn "Terminated. Processed: $processed, linked: $linked, copied: $copied, skipped: $skipped, duplicates: $duplicates, warnings: $failed"
     exit 143
 }
@@ -52,6 +73,8 @@ cleanup_on_term() {
 # --- Argument parsing ---
 DRY_RUN=0
 QUIET=0
+RESUME=0
+LOW_MEMORY=0
 MAXDEPTH=""
 
 while [[ $# -gt 0 ]]; do
@@ -59,6 +82,14 @@ while [[ $# -gt 0 ]]; do
         -h|--help)
             usage
             exit 0
+            ;;
+        --resume)
+            RESUME=1
+            shift
+            ;;
+        --low-memory)
+            LOW_MEMORY=1
+            shift
             ;;
         -v|--version)
             echo "organize_and_dedup.sh $VERSION"
@@ -229,6 +260,21 @@ fi
 HARDLINK_OK=1
 if [[ "$DRY_RUN" -eq 0 ]]; then
     check_hardlink_support || HARDLINK_OK=0
+fi
+
+# Issue #43: checkpoint file for resume support
+if [[ "$DRY_RUN" -eq 0 ]]; then
+    CKPT_FILE="$OUTPUT_DIR/.organize-checkpoint"
+    if [[ "$RESUME" -eq 1 && -f "$CKPT_FILE" ]]; then
+        loaded=0
+        while IFS= read -r h; do
+            [[ "$h" =~ ^[0-9A-F]{64}$ ]] || continue
+            seen_hashes[$h]=1
+            ((++loaded))
+        done < "$CKPT_FILE"
+        log "Resumed from checkpoint: $loaded hashes loaded."
+    fi
+    RESUME_CKPT_WRITES=1
 fi
 
 # Set traps AFTER counters are initialized (issue #31)
@@ -677,8 +723,32 @@ process_file() {
     category=${ext_category##* }
     extension=$(normalize_extension "$extension")
 
-    if ! year_month=$(get_year_month_from_exif "$file"); then
+    # Issue #18: only media files carry EXIF — skip the exiftool spawn for
+    # everything else (text, code, archives, unknown) to save a ~75ms fork
+    # per file on large runs.
+    if [[ "$category" == "images" || "$category" == "videos" ]]; then
+        if ! year_month=$(get_year_month_from_exif "$file"); then
+            year_month=$(get_year_month_from_stat "$file")
+        fi
+    else
         year_month=$(get_year_month_from_stat "$file")
+    fi
+
+    # Issue #35: empty files all hash to the same SHA-256, so they collapse
+    # to a single output entry and lose their names (.gitkeep etc). Skip
+    # them and count them as skipped instead of deduplicating.
+    local file_size
+    if [[ "$STAT_IS_GNU" == "1" ]]; then
+        file_size=$("$STAT_CMD" -c %s -- "$file" 2>/dev/null || true)
+    else
+        file_size=$("$STAT_CMD" -f %z -- "$file" 2>/dev/null || true)
+    fi
+    if [[ "$file_size" == "0" ]]; then
+        ((++skipped))
+        if [[ "$QUIET" -eq 0 ]]; then
+            log "Skipping empty file: $file"
+        fi
+        return 0
     fi
 
     hash=$(hash_file "$file")
@@ -778,9 +848,18 @@ process_file() {
     fi
 }
 
-# --- Pre-scan existing output for hash dedup (issue #42: note about O(N)) ---
+# --- Pre-scan existing output for hash dedup (issue #42) ---
+# Short-circuit: skip the O(N) pre-scan entirely when the output dir has no
+# files yet (first run) or when --low-memory is set (issue #19).
+PRESCAN_NEEDED=1
+if [[ "$LOW_MEMORY" -eq 1 ]]; then
+    PRESCAN_NEEDED=0
+    log "--low-memory set: skipping output pre-scan (dedup relies on target-path checks only)."
+elif [[ -d "$OUTPUT_DIR" ]] && ! find -L -- "$OUTPUT_DIR" -type f -print -quit 2>/dev/null | grep -q .; then
+    PRESCAN_NEEDED=0
+fi
 # Issue #48: also hash pre-existing files that don't follow <64hex>.<ext> naming
-if [[ -d "$OUTPUT_DIR" ]]; then
+if [[ "$PRESCAN_NEEDED" -eq 1 && -d "$OUTPUT_DIR" ]]; then
     # Issue #41: use -- before path
     # Issue #30: use canonical path and -L to follow symlinks
     while IFS= read -r -d '' existing_file; do
@@ -819,6 +898,17 @@ fi
 while IFS= read -r -d '' file; do
     ((++processed))
     process_file "$file"
+    # Issue #43: flush checkpoint every 10k files
+    if [[ "$RESUME_CKPT_WRITES" -eq 1 ]]; then
+        if (( (CKPT_COUNTER++, CKPT_COUNTER % 10000) == 0 )); then
+            flush_checkpoint
+        fi
+    fi
 done < <("${find_cmd[@]}" -print0)
+
+flush_checkpoint
+if [[ "$RESUME_CKPT_WRITES" -eq 1 && -f "$CKPT_FILE" ]]; then
+    rm -f -- "$CKPT_FILE"   # completed run: checkpoint no longer needed
+fi
 
 log "Completed. Processed: $processed, linked: $linked, copied: $copied, skipped: $skipped, duplicates: $duplicates, warnings: $failed"
