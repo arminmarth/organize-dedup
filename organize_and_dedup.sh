@@ -507,6 +507,7 @@ get_extension_and_category() {
         application/vnd.sketchup.skp) echo "skp documents"; return 0 ;;
         application/x-indesign) echo "indd documents"; return 0 ;;
         application/x-plist) echo "plist config"; return 0 ;;
+        message/rfc822) echo "eml email"; return 0 ;;
         text/calendar) echo "ics documents"; return 0 ;;
         text/vcard) echo "vcf documents"; return 0 ;;
         text/plain)
@@ -540,6 +541,11 @@ get_extension_and_category() {
                     tex) echo "tex text"; return 0 ;;
                     srt) echo "srt subtitles"; return 0 ;;
                     vtt) echo "vtt subtitles"; return 0 ;;
+                    # CI (file-5.45) reports these as text/plain; 5.46 knows
+                    # the proper MIME types. Filename fallback for both.
+                    mbox|mbx) echo "mbox email"; return 0 ;;
+                    eml) echo "eml email"; return 0 ;;
+                    m3u|m3u8) echo "m3u playlists"; return 0 ;;
                 esac
             fi
             echo "txt text"; return 0 ;;
