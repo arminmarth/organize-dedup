@@ -430,7 +430,7 @@ get_extension_and_category() {
         image/wmf|image/x-wmf) echo "wmf images"; return 0 ;;
         image/x-ms-emf|image/emf) echo "emf images"; return 0 ;;
         application/postscript) echo "ps documents"; return 0 ;;
-        application/vnd.adobe.photoshop) echo "psd images"; return 0 ;;
+        application/vnd.adobe.photoshop|image/vnd.adobe.photoshop) echo "psd images"; return 0 ;;
         video/mp4) echo "mp4 videos"; return 0 ;;
         video/x-m4v) echo "m4v videos"; return 0 ;;
         video/x-ms-asf) echo "asf videos"; return 0 ;;
