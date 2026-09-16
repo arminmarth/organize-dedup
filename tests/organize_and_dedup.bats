@@ -1259,3 +1259,15 @@ with open('$INPUT/test.o', 'wb') as f:
     # Should be in code, not unknown
     [ "$(find "$OUTPUT/unknown" -type f 2>/dev/null | wc -l)" -eq 0 ]
 }
+@test "PSD files are categorized as images regardless of file magic variant (issue #60)" {
+    mkdir -p "$INPUT"
+    # Minimal PSD: 8BPS signature + header. file 5.46 reports image/vnd.adobe.photoshop,
+    # older versions application/vnd.adobe.photoshop - both must map to psd images.
+    printf '8BPS\x00\x01\x00\x00\x00\x00\x00\x00\x00\x03\x00\x00\x00d\x00\x00\x00P\x00\x08\x00\x03\x00\x00\x00\x00' > "$INPUT/photo.dat"
+    run "$SCRIPT" "$INPUT" "$OUTPUT"
+    [ "$status" -eq 0 ]
+    local mime
+    mime=$(file --mime-type -b "$INPUT/photo.dat" 2>/dev/null)
+    echo "MIME: $mime" >&3
+    [ "$(find "$OUTPUT/images" -type f -name '*.psd' 2>/dev/null | wc -l)" -ge 1 ]
+}
